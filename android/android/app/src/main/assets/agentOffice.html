@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"/>
+<style>
+:root {
+  --bg-color: #050505;
+  --metal-silver: linear-gradient(145deg, #d1d1d1, #707070);
+  --accent-red: #ff3e3e;
+  --active-green: #00ff88;
+  --panel-dark: #121417;
+  --wall-detail: #1a1e23;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{background:var(--bg-color);height:100%;width:100%;overflow:hidden;font-family:'Segoe UI',sans-serif;}
+.viewport{perspective:1200px;width:100vw;height:100%;display:block;overflow:hidden;}
+.stage{position:relative;width:360px;height:360px;transform:rotateX(70deg) rotateZ(-35deg) scale(0.85);transform-style:preserve-3d;margin-top:40px;}
+
+.floor{
+  position:absolute;width:360px;height:360px;
+  background:
+    linear-gradient(rgba(255,62,62,0.05) 1px,transparent 1px),
+    repeating-linear-gradient(45deg,#0d0d0d 0px,#0d0d0d 15px,#151515 15px,#151515 30px);
+  border:2px solid #333;
+}
+
+.wall-back-left{
+  position:absolute;width:360px;height:170px;
+  background:var(--panel-dark);
+  border-bottom:3px solid var(--accent-red);
+  transform:rotateX(-90deg);transform-origin:bottom;
+  top:-170px;left:0;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:15px;box-sizing:border-box;
+  background-image:linear-gradient(to bottom,#1a1c20 0%,#0a0a0a 100%);
+}
+
+.wall-back-right{
+  position:absolute;width:170px;height:360px;
+  background:linear-gradient(180deg,#15181c 0%,#0d0f12 100%);
+  transform:rotateY(-90deg);transform-origin:left;
+  left:360px;top:0;
+  box-sizing:border-box;
+  display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:20px 10px;
+}
+
+.wall-section{
+  width:150px;height:80px;
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 5px;
+  margin:5px 0;
+}
+
+.tech-gauge{
+  width:35px;height:35px;
+  background:linear-gradient(135deg,#0d0f12,#1a1e24);
+  border:2px solid #333;
+  border-radius:50%;
+  position:relative;
+  box-shadow:inset 0 0 10px rgba(0,0,0,0.5);
+}
+.tech-gauge::before{
+  content:'';
+  position:absolute;top:50%;left:50%;
+  width:25px;height:25px;
+  transform:translate(-50%,-50%);
+  background:conic-gradient(from 180deg,#00ff88 0deg,#00ff88 120deg,#1a1e24 120deg,#1a1e24 360deg);
+  border-radius:50%;
+}
+.tech-gauge::after{
+  content:'';
+  position:absolute;top:50%;left:50%;
+  width:12px;height:12px;
+  transform:translate(-50%,-50%);
+  background:#0d0f12;
+  border-radius:50%;
+  border:1px solid #333;
+}
+
+.tech-meter{
+  width:25px;height:40px;
+  background:linear-gradient(180deg,#0d0f12,#1a1e24);
+  border:1px solid #333;
+  border-radius:3px;
+  display:flex;flex-direction:column;justify-content:flex-end;align-items:center;
+  padding:2px;
+  overflow:hidden;
+}
+.meter-fill{
+  width:100%;
+  background:linear-gradient(0deg,#00ff88,#00ccff);
+  border-radius:1px;
+  animation:meterPulse 2s ease-in-out infinite;
+}
+@keyframes meterPulse{
+  0%,100%{opacity:0.6;}
+  50%{opacity:1;}
+}
+
+.tech-display{
+  width:40px;height:30px;
+  background:#000;
+  border:1px solid #005f73;
+  border-radius:2px;
+  position:relative;
+  overflow:hidden;
+}
+.tech-display::before{
+  content:'';
+  position:absolute;top:0;left:0;right:0;bottom:0;
+  background:repeating-linear-gradient(0deg,transparent 0px,transparent 3px,rgba(0,255,136,0.03) 3px,rgba(0,255,136,0.03) 4px);
+}
+.tech-display::after{
+  content:'';
+  position:absolute;top:50%;left:5px;right:5px;
+  height:2px;
+  background:linear-gradient(90deg,#00ff88,transparent);
+  animation:displayScan 1.5s linear infinite;
+}
+@keyframes displayScan{
+  0%{transform:translateY(-12px);opacity:0;}
+  50%{opacity:1;}
+  100%{transform:translateY(12px);opacity:0;}
+}
+
+.wall-slogan{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  width:80px;
+  transform:rotateZ(90deg);
+  transform-style:preserve-3d;
+}
+.wall-logo{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:40px;
+  height:40px;
+  transform-style:preserve-3d;
+}
+.slogan-cn{
+  font-size:14px;
+  color:#00ff88;
+  letter-spacing:3px;
+  white-space:nowrap;
+  text-shadow:0 0 12px rgba(0,255,136,0.9);
+  font-weight:bold;
+}
+.slogan-en{
+  font-size:8px;
+  color:#888;
+  letter-spacing:1px;
+  white-space:nowrap;
+  margin-top:3px;
+}
+
+.power-slot{
+  width:3px;height:50px;
+  background:var(--accent-red);
+  box-shadow:0 0 10px var(--accent-red),-1px 0 3px rgba(255,0,0,0.5);
+  margin:12px 0;border-radius:1px;
+}
+
+.bay-label{
+  color:#333;font-size:14px;font-weight:900;
+  transform:rotateZ(90deg) translateX(6px);
+  opacity:0.5;letter-spacing:3px;
+}
+
+.screen-frame{background:var(--metal-silver);padding:3px;border-radius:1px;box-shadow:0 2px 6px rgba(0,0,0,0.5);}
+.screen-inner{height:40px;background:#000;border:1px solid #005f73;transition:0.3s;}
+.screen-inner.active{border-color:var(--active-green);box-shadow:inset 0 0 10px var(--active-green);}
+
+.console{
+  position:absolute;bottom:30px;left:30px;
+  width:85px;height:55px;
+  background:var(--metal-silver);
+  border-top:3px solid var(--accent-red);
+  transform:translateZ(40px);
+  box-shadow:12px 12px 25px rgba(0,0,0,0.8);
+  display:flex;align-items:center;justify-content:center;
+}
+.console::after{content:"MASTER";font-size:6px;color:#fff;opacity:0.5;}
+.console-panel{
+  position:absolute;bottom:30px;left:30px;
+  width:85px;height:40px;
+  background:linear-gradient(180deg,#3a3a3a 0%,#1a1a1a 100%);
+  border-left:2px solid #444;
+  border-right:2px solid #444;
+  border-bottom:2px solid #222;
+  transform:rotateX(-90deg);
+  transform-origin:bottom;
+}
+
+.base{
+  position:absolute;width:28px;height:28px;
+  background:radial-gradient(circle,#222,#000);
+  border:3px solid #00ff88;border-radius:50%;
+  box-shadow:0 0 6px rgba(0,255,136,0.5);
+  transform:translateZ(10px);
+}
+.docking-platform{
+  position:absolute;left:266px;top:116px;
+  width:106px;height:216px;
+  background:linear-gradient(145deg,#1a1e24,#0d0f12);
+  border:2px solid #ff3e3e;
+  transform:translateZ(8px);
+  transform-style:preserve-3d;
+  box-shadow:0 4px 15px rgba(0,0,0,0.6);
+}
+.robot{position:absolute;width:16px;height:30px;transform-style:preserve-3d;transition:1.5s cubic-bezier(0.4,0,0.2,1);}
+.robot-body{width:16px;height:27px;background:#fff;transform:rotateX(-90deg);transform-origin:bottom;border-radius:2px;box-shadow:inset -2px -2px 5px #999;}
+.robot-name{
+  position:absolute;top:-40px;left:-6px;
+  background:rgba(0,0,0,0.8);padding:1px 5px;border-radius:2px;
+  font-size:6px;color:var(--accent-red);white-space:nowrap;
+  transform:rotateX(0deg) rotateZ(35deg);border-left:1px solid var(--accent-red);
+}
+</style>
+</head>
+<body>
+<div class="viewport">
+  <div class="stage">
+    <div class="floor"></div>
+    <div class="wall-back-left" id="screenWall"></div>
+    <div class="wall-back-right">
+      <div class="bay-label">DOCKING BAY</div>
+      <div class="wall-logo" style="transform:rotateZ(90deg) translateZ(25px) translateY(-50px) translateX(125px)">
+        <img src="https://lingjian-data.tos-cn-beijing.volces.com/APP%E5%9B%BE%E6%A0%87/icon-64.png" style="width:32px;height:32px;">
+      </div>
+      <div class="wall-section">
+        <div class="wall-slogan" style="transform:rotateZ(90deg) translateZ(0px) translateY(-40px) translateX(-40px)">
+          <div class="slogan-cn">遵纪守法 忠诚可靠</div>
+          <div class="slogan-en">LOYAL &amp; RELIABLE</div>
+        </div>
+      </div>
+      <div class="wall-section" style="margin-top:50px;">
+        <div class="wall-slogan" style="transform:rotateZ(90deg) translateZ(50px) translateY(-40px) translateX(-20px)">
+          <div class="slogan-cn">精准执行 万无一失</div>
+          <div class="slogan-en">PRECISION EXECUTION</div>
+        </div>
+      </div>
+    </div>
+    <div class="console"></div>
+    <div class="console-panel"></div>
+    <div class="docking-platform">
+      <div id="actors"></div>
+    </div>
+  </div>
+</div>
+<script>
+var AGENTS = [];
+
+function listenMessages(cb){
+  function parse(e){ try{ var m=JSON.parse(e.data); if(m.type==='UPDATE_AGENTS') cb(m.agents); }catch(x){} }
+  window.addEventListener('message',parse);
+  document.addEventListener('message',parse);
+}
+
+var screenWall = document.getElementById('screenWall');
+for(var si=1; si<=8; si++){
+  var frame = document.createElement('div');
+  frame.className = 'screen-frame';
+  frame.innerHTML = '<div class="screen-inner" id="scr-'+si+'"></div><div style="font-size:5px;color:#222;text-align:center;font-weight:bold;margin-top:1px;">SYS_'+si+'</div>';
+  screenWall.appendChild(frame);
+}
+
+var actors = document.getElementById('actors');
+var robots = [];
+
+function initRobots(){
+  actors.innerHTML = '';
+  robots = [];
+  for(var i=0; i<AGENTS.length && i<10; i++){
+    var row = i % 5;
+    var col = Math.floor(i / 5);
+    var x = 14 + col * 50;
+    var y = 14 + row * 40;
+
+    var base = document.createElement('div');
+    base.className = 'base';
+    base.style.left = x + 'px';
+    base.style.top = y + 'px';
+    actors.appendChild(base);
+
+    var bot = document.createElement('div');
+    bot.className = 'robot';
+    bot.style.left = (x + 6) + 'px';
+    bot.style.top = (y + 6) + 'px';
+    var isWorking = AGENTS[i].status === 'working';
+    var nameColor = isWorking ? 'var(--active-green)' : 'var(--accent-red)';
+    bot.innerHTML = '<div class="robot-name" style="color:'+nameColor+';border-left-color:'+nameColor+'">'+AGENTS[i].name+'</div><div class="robot-body"></div>';
+    actors.appendChild(bot);
+    robots.push({el:bot,agent:AGENTS[i],hX:x+6,hY:y+6});
+  }
+}
+
+function updateScene(){
+  for(var i=0; i<robots.length && i<AGENTS.length; i++){
+    var bot = robots[i];
+    var agent = AGENTS[i];
+    var isWorking = agent.status === 'working';
+    var nameEl = bot.el.querySelector('.robot-name');
+    var nameColor = isWorking ? 'var(--active-green)' : 'var(--accent-red)';
+    nameEl.style.color = nameColor;
+    nameEl.style.borderLeftColor = nameColor;
+    nameEl.textContent = agent.name;
+
+    var scr = document.getElementById('scr-'+(i+1));
+    if(scr){
+      if(isWorking){
+        scr.classList.add('active');
+      }else{
+        scr.classList.remove('active');
+      }
+    }
+
+    if(isWorking && i<8){
+      var tx = 25 + (i % 4) * 87;
+      var ty = 28 + Math.floor(i / 4) * 66;
+      bot.el.style.left = tx + 'px';
+      bot.el.style.top = ty + 'px';
+    }else{
+      bot.el.style.left = bot.hX + 'px';
+      bot.el.style.top = bot.hY + 'px';
+    }
+  }
+}
+
+window.buildCharacters = function(){
+  initRobots();
+  updateScene();
+};
+
+listenMessages(function(newAgents){
+  AGENTS = newAgents;
+  updateScene();
+});
+
+// 通知 React Native 场景已就绪
+window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({type:'SCENE_READY'}));
+</script>
+</body>
+</html>

@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#222427;touch-action:none}
+canvas{display:block}
+#info{position:fixed;top:8px;left:8px;background:rgba(0,0,0,.75);color:#fff;padding:6px 12px;border-radius:8px;font:12px sans-serif;pointer-events:none;z-index:99}
+#mi{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(178,0,0,.9);color:#fff;padding:8px 18px;border-radius:20px;font:bold 14px sans-serif;pointer-events:none;z-index:99;display:none;white-space:nowrap}
+</style>
+</head>
+<body>
+<div id="info">加载引擎...</div>
+<div id="mi"></div>
+<script src="three.min.js"></script>
+<script>
+(function(){
+var info=document.getElementById('info');
+var mi=document.getElementById('mi');
+
+function post(obj){
+  try{window.ReactNativeWebView.postMessage(JSON.stringify(obj));}catch(e){}
+}
+
+if(typeof THREE==='undefined'){
+  info.textContent='Three.js加载失败';
+  post({type:'error',value:'THREE undefined'});
+  return;
+}
+
+var W=window.innerWidth;
+var H=window.innerHeight;
+var scene,cam,renderer,cadG,annG;
+var totalL=0,totalT=0;
+var center,fitScale=1,curScale=1,panX=0,panY=0;
+// Store raw data as Float64 — normalization happens in finishRender
+var rawLines=[];  // [x1,y1,x2,y2,color, ...]
+var rawTexts=[];  // [{t,x,y,h,c}, ...]
+var offsetX=0,offsetY=0;
+
+try{
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x1a1a2e);
+  cam=new THREE.OrthographicCamera(-W/2,W/2,H/2,-H/2,-1000,1000);
+  cam.position.set(0,0,100);
+  cam.lookAt(0,0,0);
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(W,H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+  document.body.appendChild(renderer.domElement);
+  cadG=new THREE.Group();scene.add(cadG);
+  annG=new THREE.Group();scene.add(annG);
+  center=new THREE.Vector3();
+}catch(e){
+  info.textContent='WebGL初始化失败: '+e.message;
+  post({type:'error',value:'WebGL init: '+e.message});
+  return;
+}
+
+info.textContent='就绪，等待数据...';
+post({type:'webviewReady'});
+
+// Receive line data batches — store as raw Float64
+window.addFlat=function(arr){
+  for(var i=0;i<arr.length;i++) rawLines.push(arr[i]);
+  totalL+=Math.floor(arr.length/5);
+  info.textContent='接收 '+totalL+' 线...';
+};
+
+// Receive text data — store for deferred placement
+window.addTexts=function(ts){
+  for(var i=0;i<ts.length;i++) rawTexts.push(ts[i]);
+  totalT+=ts.length;
+};
+
+// Finalize: normalize, filter outliers, build geometry, fit view
+window.finishRender=function(){
+  info.textContent='归一化处理...';
+
+  var n=rawLines.length/5;
+  if(n===0){info.textContent='无数据';post({type:'renderDone'});return;}
+
+  // Step 1: Compute median
+  var allX=[],allY=[];
+  for(var i=0;i<rawLines.length;i+=5){
+    allX.push(rawLines[i],rawLines[i+2]);
+    allY.push(rawLines[i+1],rawLines[i+3]);
+  }
+  allX.sort(function(a,b){return a-b;});
+  allY.sort(function(a,b){return a-b;});
+
+  var mx=allX[Math.floor(allX.length/2)];
+  var my=allY[Math.floor(allY.length/2)];
+  offsetX=mx; offsetY=my;
+
+  // Step 2: Normalize in-place
+  for(var i=0;i<rawLines.length;i+=5){
+    rawLines[i]-=mx; rawLines[i+1]-=my;
+    rawLines[i+2]-=mx; rawLines[i+3]-=my;
+  }
+
+  // Step 3: Detect outliers on normalized data
+  var nx=[],ny=[];
+  for(var i=0;i<rawLines.length;i+=5){
+    nx.push(rawLines[i],rawLines[i+2]);
+    ny.push(rawLines[i+1],rawLines[i+3]);
+  }
+  nx.sort(function(a,b){return a-b;});
+  ny.sort(function(a,b){return a-b;});
+
+  var p2=Math.floor(nx.length*0.02);
+  var p98=Math.min(nx.length-1,Math.floor(nx.length*0.98));
+  var coreW=nx[p98]-nx[p2], coreH=ny[p98]-ny[p2];
+  var fullW=nx[nx.length-1]-nx[0], fullH=ny[ny.length-1]-ny[0];
+  var needFilter=(coreW>0&&fullW/coreW>2)||(coreH>0&&fullH/coreH>2);
+
+  var xLo,xHi,yLo,yHi;
+  if(needFilter){
+    xLo=nx[p2]-coreW; xHi=nx[p98]+coreW;
+    yLo=ny[p2]-coreH; yHi=ny[p98]+coreH;
+  }
+
+  // Step 4: Build geometry with normalized data
+  info.textContent='构建几何体...';
+  var buckets={};
+  var keptLines=0;
+  for(var i=0;i<rawLines.length;i+=5){
+    var x1=rawLines[i],y1=rawLines[i+1],x2=rawLines[i+2],y2=rawLines[i+3],k=rawLines[i+4];
+    if(needFilter){
+      var in1=x1>=xLo&&x1<=xHi&&y1>=yLo&&y1<=yHi;
+      var in2=x2>=xLo&&x2<=xHi&&y2>=yLo&&y2<=yHi;
+      if(!in1&&!in2) continue;
+    }
+    if(!buckets[k])buckets[k]=[];
+    buckets[k].push(x1,y1,0,x2,y2,0);
+    keptLines++;
+  }
+  rawLines=[];
+
+  Object.keys(buckets).forEach(function(k){
+    var v=buckets[k];
+    var g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));
+    cadG.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:parseInt(k)})));
+  });
+  buckets={};
+
+  // Step 5: Place texts with offset
+  rawTexts.forEach(function(t){try{
+    var cv=document.createElement('canvas'),ctx=cv.getContext('2d');
+    var fs=Math.max(10,Math.min(24,Math.round(t.h*3)));
+    ctx.font=fs+'px sans-serif';
+    var tw=ctx.measureText(t.t).width+6;
+    cv.width=Math.min(256,Math.max(24,Math.ceil(tw)));
+    cv.height=fs+4;
+    ctx.font=fs+'px sans-serif';
+    ctx.fillStyle='#'+('000000'+t.c.toString(16)).slice(-6);
+    ctx.textBaseline='top';
+    ctx.fillText(t.t,3,2);
+    var tex=new THREE.CanvasTexture(cv);
+    tex.minFilter=THREE.LinearFilter;
+    var mat=new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false});
+    var sp=new THREE.Sprite(mat);
+    sp.scale.set(t.h*(cv.width/cv.height),t.h,1);
+    sp.position.set(t.x-mx,t.y-my,1);
+    cadG.add(sp);
+  }catch(e){}});
+  rawTexts=[];
+
+  // Step 6: Fit view
+  var box=new THREE.Box3().setFromObject(cadG);
+  if(!box.isEmpty()){
+    box.getCenter(center);
+    var sz=new THREE.Vector3();
+    box.getSize(sz);
+    fitScale=Math.min(W/(sz.x*1.1),H/(sz.y*1.1));
+    curScale=fitScale;
+    cadG.position.set(-center.x*curScale,-center.y*curScale,0);
+    cadG.scale.set(curScale,curScale,1);
+  }
+  info.textContent=keptLines+' 线 | '+totalT+' 文字';
+  post({type:'renderDone'});
+};
+
+function upd(){
+  cadG.scale.set(curScale,curScale,1);
+  cadG.position.set(-center.x*curScale+panX,-center.y*curScale+panY,0);
+}
+
+// ── Touch controls ──
+var touches={},lpd=0,lpx=0,lpy=0,isPan=false,tapS=null;
+var tool='none',mPts=[],mLines=[],annots=[],drawPts=[],pendTP=null;
+
+renderer.domElement.addEventListener('touchstart',function(ev){
+  ev.preventDefault();
+  for(var i=0;i<ev.changedTouches.length;i++){
+    var t=ev.changedTouches[i];
+    touches[t.identifier]={x:t.clientX,y:t.clientY};
+  }
+  var ks=Object.keys(touches);
+  if(ks.length===2){
+    var t1=touches[ks[0]],t2=touches[ks[1]];
+    lpd=Math.hypot(t2.x-t1.x,t2.y-t1.y);
+  }
+  if(ks.length===1){
+    lpx=touches[ks[0]].x;lpy=touches[ks[0]].y;isPan=true;
+    if(tool!=='none')tapS={x:touches[ks[0]].x,y:touches[ks[0]].y,time:Date.now()};
+  }
+},{passive:false});
+
+renderer.domElement.addEventListener('touchmove',function(ev){
+  ev.preventDefault();
+  for(var i=0;i<ev.changedTouches.length;i++){
+    var t=ev.changedTouches[i];
+    touches[t.identifier]={x:t.clientX,y:t.clientY};
+  }
+  var ks=Object.keys(touches);
+  if(ks.length===2){
+    isPan=false;
+    var t1=touches[ks[0]],t2=touches[ks[1]];
+    var d=Math.hypot(t2.x-t1.x,t2.y-t1.y);
+    if(lpd>0){
+      var pmx=(t1.x+t2.x)/2,pmy=(t1.y+t2.y)/2;
+      var wx=(pmx-panX-W/2)/curScale+center.x;
+      var wy=-(pmy+panY-H/2)/curScale+center.y;
+      curScale*=d/lpd;
+      curScale=Math.max(fitScale*0.1,Math.min(fitScale*200,curScale));
+      panX=pmx-(wx-center.x)*curScale-W/2;
+      panY=-(wy-center.y)*curScale-pmy+H/2;
+      upd();
+    }
+    lpd=d;
+  } else if(ks.length===1&&isPan){
+    panX+=touches[ks[0]].x-lpx;
+    panY-=touches[ks[0]].y-lpy;
+    lpx=touches[ks[0]].x;lpy=touches[ks[0]].y;
+    upd();
+  }
+},{passive:false});
+
+renderer.domElement.addEventListener('touchend',function(ev){
+  for(var i=0;i<ev.changedTouches.length;i++)
+    delete touches[ev.changedTouches[i].identifier];
+  if(Object.keys(touches).length<2)lpd=0;
+  isPan=false;
+  if(tapS&&ev.changedTouches.length>0){
+    var ct=ev.changedTouches[0];
+    if(Date.now()-tapS.time<400&&Math.hypot(ct.clientX-tapS.x,ct.clientY-tapS.y)<15)
+      onTap(ct.clientX,ct.clientY);
+    tapS=null;
+  }
+});
+
+function s2w(sx,sy){
+  return{x:(sx-panX-W/2)/curScale+center.x,y:-(sy+panY-H/2)/curScale+center.y};
+}
+function mk(w,cl){
+  var s=3/curScale;
+  var g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute([w.x-s,w.y-s,2,w.x+s,w.y+s,2,w.x-s,w.y+s,2,w.x+s,w.y-s,2],3));
+  annG.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:cl||0xff3333})));
+}
+function ml(p1,p2){
+  var g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute([p1.x,p1.y,2,p2.x,p2.y,2],3));
+  var l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xff3333}));
+  annG.add(l);return l;
+}
+function clrM(){mPts=[];mLines.forEach(function(l){annG.remove(l);l.geometry.dispose();});mLines=[];mi.style.display='none';}
+function fD(d){if(d>=1000)return(d/1000).toFixed(2)+' km';if(d>=1)return d.toFixed(2)+' m';return(d*1000).toFixed(1)+' mm';}
+function fA(a){if(a>=1e6)return(a/1e6).toFixed(2)+' km²';if(a>=1)return a.toFixed(2)+' m²';return(a*1e6).toFixed(0)+' mm²';}
+function cA(pts){var a=0;for(var i=0;i<pts.length;i++){var j=(i+1)%pts.length;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;}return Math.abs(a)/2;}
+
+function onTap(sx,sy){
+  var w=s2w(sx,sy);
+  if(tool==='measure_dist'){
+    mPts.push(w);mk(w,0xff3333);
+    if(mPts.length===2){
+      mLines.push(ml(mPts[0],mPts[1]));
+      var d=Math.hypot(mPts[1].x-mPts[0].x,mPts[1].y-mPts[0].y);
+      var t='距离: '+fD(d);mi.textContent=t;mi.style.display='block';
+      post({type:'measureResult',value:t});
+      mPts=[];
+    }
+  } else if(tool==='measure_area'){
+    mPts.push(w);mk(w,0x33cc33);
+    if(mPts.length>=2)mLines.push(ml(mPts[mPts.length-2],mPts[mPts.length-1]));
+    if(mPts.length>=3){mi.textContent='面积: '+fA(cA(mPts));mi.style.display='block';}
+  } else if(tool==='annotate_text'){
+    pendTP=w;
+    post({type:'requestText'});
+  } else if(tool==='annotate_draw'){
+    drawPts.push(w);
+    if(drawPts.length>=2){
+      var g=new THREE.BufferGeometry();
+      g.setAttribute('position',new THREE.Float32BufferAttribute([drawPts[drawPts.length-2].x,drawPts[drawPts.length-2].y,2,drawPts[drawPts.length-1].x,drawPts[drawPts.length-1].y,2],3));
+      annG.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xff6600})));
+    }
+  }
+}
+
+function addTA(text,x,y){
+  try{
+    var cv=document.createElement('canvas'),ctx=cv.getContext('2d'),fs=20;
+    ctx.font='bold '+fs+'px sans-serif';
+    var tw=ctx.measureText(text).width;var pw=tw+20,ph=fs+14;
+    cv.width=pw;cv.height=ph;
+    ctx.fillStyle='rgba(178,0,0,.85)';ctx.beginPath();
+    if(ctx.roundRect)ctx.roundRect(0,0,pw,ph,6);else ctx.rect(0,0,pw,ph);
+    ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold '+fs+'px sans-serif';ctx.textBaseline='middle';ctx.fillText(text,10,ph/2);
+    var tex=new THREE.CanvasTexture(cv);tex.minFilter=THREE.LinearFilter;
+    var mat=new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false});
+    var sp=new THREE.Sprite(mat);var sc=8/curScale;
+    sp.scale.set(sc*pw/ph,sc,1);sp.position.set(x,y,3);annG.add(sp);annots.push(sp);
+  }catch(e){}
+}
+
+window.handleRNMessage=function(msg){
+  if(msg.type==='setTool'){tool=msg.value||'none';clrM();drawPts=[];}
+  else if(msg.type==='placeText'&&pendTP){addTA(msg.value,pendTP.x,pendTP.y);pendTP=null;}
+  else if(msg.type==='fitView'){curScale=fitScale;panX=0;panY=0;upd();}
+  else if(msg.type==='clearAnnotations'){
+    annots.forEach(function(a){annG.remove(a);if(a.geometry)a.geometry.dispose();});
+    annots=[];clrM();
+  }
+  else if(msg.type==='endArea'&&mPts.length>=3){
+    mLines.push(ml(mPts[mPts.length-1],mPts[0]));
+    var t='面积: '+fA(cA(mPts));mi.textContent=t;
+    post({type:'measureResult',value:t});
+    mPts=[];
+  }
+};
+
+function animate(){requestAnimationFrame(animate);renderer.render(scene,cam);}
+animate();
+
+window.addEventListener('resize',function(){
+  W=window.innerWidth;H=window.innerHeight;
+  cam.left=-W/2;cam.right=W/2;cam.top=H/2;cam.bottom=-H/2;
+  cam.updateProjectionMatrix();renderer.setSize(W,H);
+});
+})();
+</script>
+</body>
+</html>

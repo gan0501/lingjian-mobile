@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>CAD-Viewer Test</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100vh;overflow:hidden;background:#1a1a1a}
+#cad-container{width:100%;height:100%;position:absolute;top:0;left:0}
+#info{position:fixed;top:10px;left:10px;color:lime;font:12px monospace;z-index:100;background:rgba(0,0,0,0.8);padding:8px;max-height:50%;overflow:auto;pointer-events:none}
+</style>
+</head><body>
+<div id="cad-container"></div>
+<div id="info">初始化...</div>
+
+<script src="cad-viewer-bundle.js"></script>
+<script>
+var log = [];
+function addLog(msg) {
+  log.push(msg);
+  document.getElementById('info').innerHTML = log.join('<br>');
+  console.log(msg);
+}
+
+(async function(){
+  try {
+    var CV = window.CadViewer;
+    addLog('1. CadViewer loaded');
+
+    var dm = new CV.AcApDocManager({
+      container: document.getElementById('cad-container'),
+      autoResize: true
+    });
+    addLog('2. DocManager created');
+
+    // Fetch test.dwg
+    addLog('3. Fetching test.dwg...');
+    var resp = await fetch('test.dwg');
+    var buf = await resp.arrayBuffer();
+    var bytes = new Uint8Array(buf);
+    addLog('4. File loaded: ' + bytes.length + ' bytes');
+
+    // Use dm.openDocument() (NOT doc.openDocument!) 
+    // DocManager.openDocument calls onBeforeOpenDocument + onAfterOpenDocument which triggers rendering
+    addLog('5. Calling dm.openDocument...');
+    var ok = await dm.openDocument('test.dwg', bytes);
+    addLog('6. openDocument result: ' + ok);
+    addLog('Done!');
+    
+  } catch(e) {
+    addLog('ERROR: ' + e.message);
+    console.error(e);
+  }
+})();
+</script>
+</body></html>

@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#FFFFFF"
+    android:maxHeight="500dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#F5F5F5">
+
+        <LinearLayout
+            android:id="@+id/tab_template_config"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="horizontal">
+            
+            <TextView
+                android:id="@+id/tv_tab_template"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="水印配置"
+                android:textColor="#EF4444"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="24dp"
+            android:background="#E0E0E0" />
+
+        <LinearLayout
+            android:id="@+id/tab_edit_fields"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="horizontal">
+            
+            <TextView
+                android:id="@+id/tv_tab_edit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="编辑信息项"
+                android:textColor="#666666"
+                android:textSize="14sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/panel_template_config"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="16dp"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="一、右上角区域"
+                android:textColor="#333333"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp" />
+
+            <CheckBox
+                android:id="@+id/cb_top_right_enabled"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="启用右上角区域"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/et_title"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:hint="记录标题（默认：打卡记录）"
+                android:textSize="13sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:background="@drawable/edit_text_bg"
+                android:layout_marginTop="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="显示模式"
+                android:textColor="#666666"
+                android:textSize="13sp"
+                android:layout_marginTop="10dp" />
+
+            <LinearLayout
+                android:id="@+id/rg_display_mode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <RadioButton
+                    android:id="@+id/rb_weather"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="天气"
+                    android:textSize="13sp" />
+
+                <RadioButton
+                    android:id="@+id/rb_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="计数"
+                    android:textSize="13sp"
+                    android:layout_marginStart="16dp" />
+
+                <FrameLayout
+                    android:id="@+id/count_input_layout"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:visibility="gone"
+                    android:background="@drawable/edit_text_bg">
+
+                    <EditText
+                        android:id="@+id/et_count_value"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:hint="输入数量"
+                        android:inputType="number"
+                        android:textSize="13sp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="50dp"
+                        android:background="@null" />
+
+                    <TextView
+                        android:id="@+id/tv_unit_selector"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:layout_gravity="end|center_vertical"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="12dp"
+                        android:gravity="center"
+                        android:text="个"
+                        android:textSize="13sp"
+                        android:textColor="#666666"
+                        android:clickable="true"
+                        android:focusable="true" />
+                </FrameLayout>
+            </LinearLayout>
+
+            <CheckBox
+                android:id="@+id/cb_show_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="显示时间"
+                android:textSize="13sp"
+                android:layout_marginTop="6dp" />
+
+            <CheckBox
+                android:id="@+id/cb_show_coordinates"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="显示经纬度"
+                android:textSize="13sp" />
+
+            <CheckBox
+                android:id="@+id/cb_show_altitude"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="显示海拔"
+                android:textSize="13sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#E0E0E0"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="二、右下角区域"
+                android:textColor="#333333"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp" />
+
+            <CheckBox
+                android:id="@+id/cb_show_map"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="显示地图缩略图"
+                android:textSize="13sp" />
+
+            <CheckBox
+                android:id="@+id/cb_show_qrcode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="显示二维码"
+                android:textSize="13sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#E0E0E0"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="三、左下角特殊场景"
+                android:textColor="#333333"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp" />
+
+            <CheckBox
+                android:id="@+id/cb_show_brand_logo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="显示品牌Logo"
+                android:textSize="13sp" />
+
+            <CheckBox
+                android:id="@+id/cb_license_plate_mode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="车牌识别模式"
+                android:textSize="13sp" />
+
+            <CheckBox
+                android:id="@+id/cb_signature_mode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="签名模式"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <ScrollView
+        android:id="@+id/panel_edit_fields"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="16dp"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="第一列信息（最多6项）"
+                android:textColor="#333333"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp" />
+
+            <LinearLayout
+                android:id="@+id/left_fields_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#E0E0E0"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="第二列信息（最多6项）"
+                android:textColor="#333333"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp" />
+
+            <LinearLayout
+                android:id="@+id/right_fields_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:background="#FFFFFF">
+
+        <Button
+            android:id="@+id/btn_cancel"
+            android:layout_width="120dp"
+            android:layout_height="38dp"
+            android:text="取消"
+            android:textSize="14sp"
+            android:background="@drawable/btn_cancel_bg"
+            android:textColor="#666666" />
+
+        <Button
+            android:id="@+id/btn_confirm"
+            android:layout_width="120dp"
+            android:layout_height="38dp"
+            android:layout_marginStart="20dp"
+            android:text="确认"
+            android:textSize="14sp"
+            android:background="@drawable/btn_confirm_bg"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+
+</LinearLayout>

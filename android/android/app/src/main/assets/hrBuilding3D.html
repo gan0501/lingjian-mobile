@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;}
+html,body{
+  background:linear-gradient(180deg,#fdf4ff 0%,#fce7f3 50%,#f0f9ff 100%);
+  height:100%;width:100%;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  touch-action:none;
+}
+#container{width:100%;height:100%;position:relative;touch-action:none;}
+#status{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  color:#ec4899;font-family:sans-serif;font-size:14px;
+  text-align:center;z-index:9999;pointer-events:none;
+  text-shadow:0 0 12px #ec4899;
+}
+.label-3d{
+  position:absolute;
+  background:rgba(255,255,255,0.95);
+  border-radius:8px;
+  padding:6px 12px;
+  font-size:11px;
+  font-weight:600;
+  color:#1e293b;
+  box-shadow:0 2px 8px rgba(0,0,0,0.1);
+  pointer-events:none;
+  white-space:nowrap;
+  border:1px solid rgba(236,72,153,0.2);
+}
+.label-3d .value{
+  color:#ec4899;
+  font-weight:700;
+  margin-left:4px;
+}
+</style>
+</head>
+<body>
+<div id="container"></div>
+
+<script src="file:///android_asset/three-all.js"></script>
+<script>
+var scene, camera, renderer, clock;
+var buildings = {};
+var floatingLabels = [];
+var particleSystems = [];
+
+var DEFAULT_H = 0;
+var DEFAULT_V = 15;
+var MIN_V = 5;
+var MAX_V = 45;
+
+var cameraControl = {
+  horizontalAngle: DEFAULT_H,
+  verticalAngle: DEFAULT_V,
+  radius: 280,
+  target: new THREE.Vector3(0, 40, 0)
+};
+
+var cameraResetState = {
+  active: false,
+  delayTimer: null,
+  startTime: 0,
+  duration: 1000,
+  fromH: DEFAULT_H,
+  fromV: DEFAULT_V
+};
+
+function cancelReset() {
+  var rs = cameraResetState;
+  if (rs.delayTimer) { clearTimeout(rs.delayTimer); rs.delayTimer = null; }
+  rs.active = false;
+}
+
+function scheduleReset() {
+  var rs = cameraResetState;
+  cancelReset();
+  rs.delayTimer = setTimeout(function() {
+    rs.fromH = cameraControl.horizontalAngle;
+    rs.fromV = cameraControl.verticalAngle;
+    rs.startTime = performance.now();
+    rs.active = true;
+  }, 2000);
+}
+
+function updateCameraPosition() {
+  var ctrl = cameraControl;
+  ctrl.verticalAngle = Math.max(MIN_V, Math.min(MAX_V, ctrl.verticalAngle));
+  var hRad = ctrl.horizontalAngle * Math.PI / 180;
+  var vRad = ctrl.verticalAngle * Math.PI / 180;
+  var horizontalDist = ctrl.radius * Math.cos(vRad);
+  var height = ctrl.radius * Math.sin(vRad);
+  var x = horizontalDist * Math.sin(hRad);
+  var z = horizontalDist * Math.cos(hRad);
+  var y = height + ctrl.target.y;
+  camera.position.set(x, y, z);
+  camera.lookAt(ctrl.target);
+}
+
+function init() {
+  var container = document.getElementById('container');
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfdf4ff);
+  scene.fog = new THREE.Fog(0xfdf4ff, 200, 800);
+
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 3000);
+  updateCameraPosition();
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace || 'srgb';
+  renderer.toneMapping = THREE.NoToneMapping;
+  container.appendChild(renderer.domElement);
+
+  buildLights();
+  buildFloor();
+  buildHRBuildings();
+  buildDecorations();
+
+  clock = new THREE.Clock();
+  animate();
+
+  window.addEventListener('resize', onResize);
+  setupControls();
+}
+
+function setupControls() {
+  var canvas = renderer.domElement;
+  var isDragging = false;
+  var startX = 0, startY = 0, startHAngle = 0, startVAngle = 0;
+  canvas.style.touchAction = 'none';
+
+  canvas.addEventListener('touchstart', function(e) {
+    if (e.touches.length === 1) {
+      isDragging = true; cancelReset();
+      startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+      startHAngle = cameraControl.horizontalAngle;
+      startVAngle = cameraControl.verticalAngle;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', function(e) {
+    if (!isDragging || e.touches.length !== 1) return;
+    var deltaX = e.touches[0].clientX - startX;
+    var deltaY = e.touches[0].clientY - startY;
+    cameraControl.horizontalAngle = startHAngle - deltaX * 0.5;
+    cameraControl.verticalAngle = startVAngle + deltaY * 0.4;
+    updateCameraPosition();
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', function(e) {
+    isDragging = false; scheduleReset(); e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchcancel', function(e) {
+    isDragging = false; scheduleReset(); e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('mousedown', function(e) {
+    isDragging = true; cancelReset();
+    startX = e.clientX; startY = e.clientY;
+    startHAngle = cameraControl.horizontalAngle;
+    startVAngle = cameraControl.verticalAngle;
+  });
+
+  canvas.addEventListener('mousemove', function(e) {
+    if (!isDragging) return;
+    cameraControl.horizontalAngle = startHAngle - (e.clientX - startX) * 0.5;
+    cameraControl.verticalAngle = startVAngle + (e.clientY - startY) * 0.4;
+    updateCameraPosition();
+  });
+
+  canvas.addEventListener('mouseup', function() { isDragging = false; scheduleReset(); });
+  canvas.addEventListener('mouseleave', function() { isDragging = false; scheduleReset(); });
+
+  document.body.addEventListener('touchmove', function(e){ e.preventDefault(); }, { passive: false });
+}
+
+function buildLights() {
+  scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+  
+  var dir = new THREE.DirectionalLight(0xffffff, 2.0);
+  dir.position.set(80, 150, 80);
+  dir.castShadow = true;
+  dir.shadow.mapSize.width = 1024;
+  dir.shadow.mapSize.height = 1024;
+  dir.shadow.camera.near = 0.5;
+  dir.shadow.camera.far = 400;
+  dir.shadow.camera.left = -150;
+  dir.shadow.camera.right = 150;
+  dir.shadow.camera.top = 150;
+  dir.shadow.camera.bottom = -150;
+  scene.add(dir);
+
+  var fill = new THREE.DirectionalLight(0xf9a8d4, 0.6);
+  fill.position.set(-100, 60, -80);
+  scene.add(fill);
+  
+  var back = new THREE.DirectionalLight(0xffffff, 0.5);
+  back.position.set(0, 40, 150);
+  scene.add(back);
+}
+
+function buildFloor() {
+  var canvas = document.createElement('canvas');
+  canvas.width = 1024; canvas.height = 1024;
+  var ctx = canvas.getContext('2d');
+  
+  var radGrad = ctx.createRadialGradient(512, 512, 0, 512, 512, 512);
+  radGrad.addColorStop(0, '#fdf2f8');
+  radGrad.addColorStop(0.3, '#fce7f3');
+  radGrad.addColorStop(0.6, 'rgba(252,231,243,0.5)');
+  radGrad.addColorStop(1, 'rgba(252,231,243,0)');
+  ctx.fillStyle = radGrad;
+  ctx.fillRect(0, 0, 1024, 1024);
+  
+  for(var i=0; i<=1024; i+=64){
+    var dist = Math.abs(i - 512) / 512;
+    var alpha = Math.max(0, 0.04 * (1 - dist));
+    ctx.strokeStyle = 'rgba(236,72,153,' + alpha + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 1024); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(1024, i); ctx.stroke();
+  }
+  
+  var tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+
+  var floor = new THREE.Mesh(
+    new THREE.CircleGeometry(400, 64),
+    new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: 0.9,
+      metalness: 0.02,
+      transparent: true,
+      alphaTest: 0.01
+    })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -1;
+  floor.receiveShadow = true;
+  scene.add(floor);
+}
+
+function createGradientTexture(color1, color2, vertical) {
+  var canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 256;
+  var ctx = canvas.getContext('2d');
+  
+  var grad;
+  if (vertical) {
+    grad = ctx.createLinearGradient(0, 0, 0, 256);
+  } else {
+    grad = ctx.createLinearGradient(0, 0, 256, 0);
+  }
+  grad.addColorStop(0, color1);
+  grad.addColorStop(1, color2);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+  
+  return new THREE.CanvasTexture(canvas);
+}
+
+function createHRBuilding(x, z, w, h, d, primaryColor, secondaryColor, name, icon) {
+  var group = new THREE.Group();
+  group.userData = { name: name, type: 'hr_building', w: w, h: h, d: d, icon: icon };
+
+  var bodyMat = new THREE.MeshStandardMaterial({
+    color: primaryColor,
+    roughness: 0.4,
+    metalness: 0.1,
+    transparent: true,
+    opacity: 0.95
+  });
+
+  var bodyGeo = new THREE.BoxGeometry(w, h, d);
+  var body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = h / 2;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  group.add(body);
+
+  var topMat = new THREE.MeshStandardMaterial({
+    color: secondaryColor,
+    roughness: 0.3,
+    metalness: 0.2,
+    emissive: secondaryColor,
+    emissiveIntensity: 0.1
+  });
+  
+  var topGeo = new THREE.BoxGeometry(w * 1.1, h * 0.08, d * 1.1);
+  var top = new THREE.Mesh(topGeo, topMat);
+  top.position.y = h + h * 0.04;
+  top.castShadow = true;
+  group.add(top);
+
+  var edgeGeo = new THREE.EdgesGeometry(bodyGeo);
+  var edgeMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
+  var edges = new THREE.LineSegments(edgeGeo, edgeMat);
+  edges.position.y = h / 2;
+  group.add(edges);
+
+  var labelCanvas = document.createElement('canvas');
+  labelCanvas.width = 256; labelCanvas.height = 64;
+  var lctx = labelCanvas.getContext('2d');
+  lctx.fillStyle = 'rgba(255,255,255,0.95)';
+  lctx.roundRect(0, 0, 256, 64, 8);
+  lctx.fill();
+  lctx.fillStyle = primaryColor;
+  lctx.font = 'bold 24px -apple-system, sans-serif';
+  lctx.textAlign = 'center';
+  lctx.textBaseline = 'middle';
+  lctx.fillText(name, 128, 32);
+  
+  var labelTex = new THREE.CanvasTexture(labelCanvas);
+  var labelMat = new THREE.MeshBasicMaterial({ map: labelTex, transparent: true });
+  var labelGeo = new THREE.PlaneGeometry(w * 0.8, h * 0.12);
+  var label = new THREE.Mesh(labelGeo, labelMat);
+  label.position.set(0, h * 0.85, d / 2 + 0.5);
+  group.add(label);
+
+  group.position.set(x, 0, z);
+  return group;
+}
+
+function buildHRBuildings() {
+  var S = 0.5;
+
+  buildings.roster = createHRBuilding(
+    -80 * S, -60 * S,
+    100 * S, 120 * S, 80 * S,
+    0xf472b6, 0xec4899,
+    '人员花名册', 'employees'
+  );
+  scene.add(buildings.roster);
+
+  buildings.attendance = createHRBuilding(
+    80 * S, -60 * S,
+    100 * S, 60 * S, 80 * S,
+    0x22d3ee, 0x06b6d4,
+    '考勤时钟', 'clock'
+  );
+  scene.add(buildings.attendance);
+
+  buildings.leave = createHRBuilding(
+    -80 * S, 60 * S,
+    80 * S, 50 * S, 70 * S,
+    0xa78bfa, 0x8b5cf6,
+    '请假审批', 'calendar'
+  );
+  scene.add(buildings.leave);
+
+  buildings.salary = createHRBuilding(
+    80 * S, 60 * S,
+    90 * S, 70 * S, 75 * S,
+    0x34d399, 0x10b981,
+    '薪资结算', 'wallet'
+  );
+  scene.add(buildings.salary);
+
+  buildings.recruit = createHRBuilding(
+    0, -120 * S,
+    120 * S, 45 * S, 90 * S,
+    0xfbbf24, 0xf59e0b,
+    '招聘市场', 'users'
+  );
+  scene.add(buildings.recruit);
+}
+
+function buildDecorations() {
+  var particleCount = 50;
+  var positions = new Float32Array(particleCount * 3);
+  var colors = new Float32Array(particleCount * 3);
+  
+  for (var i = 0; i < particleCount; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 300;
+    positions[i * 3 + 1] = Math.random() * 100 + 20;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 300;
+    
+    var color = new THREE.Color().setHSL(0.9 + Math.random() * 0.1, 0.8, 0.7);
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  
+  var particleGeo = new THREE.BufferGeometry();
+  particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  particleGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  
+  var particleMat = new THREE.PointsMaterial({
+    size: 3,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.6,
+    sizeAttenuation: true
+  });
+  
+  var particles = new THREE.Points(particleGeo, particleMat);
+  particles.userData = { isParticle: true, initialPositions: positions.slice() };
+  scene.add(particles);
+  particleSystems.push(particles);
+}
+
+function handleBuildingClick(obj) {
+  animateClick(obj);
+  if(window.ReactNativeWebView) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      action: 'hr_building_click',
+      name: obj.userData.name,
+      icon: obj.userData.icon
+    }));
+  }
+}
+
+function animateClick(obj) {
+  var originalScale = obj.scale.x;
+  var t = 0;
+  function bounce(){
+    t += 0.1;
+    var scale = originalScale + Math.sin(t * 8) * 0.05 * Math.exp(-t * 2);
+    obj.scale.set(scale, scale, scale);
+    if(t < 2) requestAnimationFrame(bounce);
+    else obj.scale.set(originalScale, originalScale, originalScale);
+  }
+  bounce();
+}
+
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  var time = clock.getElapsedTime();
+
+  var rs = cameraResetState;
+  if (rs.active) {
+    var elapsed = performance.now() - rs.startTime;
+    var t = Math.min(elapsed / rs.duration, 1);
+    var ease = t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1;
+    cameraControl.horizontalAngle = rs.fromH + (DEFAULT_H - rs.fromH) * ease;
+    cameraControl.verticalAngle = rs.fromV + (DEFAULT_V - rs.fromV) * ease;
+    updateCameraPosition();
+    if (t >= 1) rs.active = false;
+  }
+
+  particleSystems.forEach(function(ps) {
+    var positions = ps.geometry.attributes.position.array;
+    var initial = ps.userData.initialPositions;
+    for (var i = 0; i < positions.length; i += 3) {
+      positions[i + 1] = initial[i + 1] + Math.sin(time + i) * 5;
+    }
+    ps.geometry.attributes.position.needsUpdate = true;
+  });
+
+  renderer.render(scene, camera);
+}
+
+setTimeout(init, 100);
+</script>
+</body>
+</html>

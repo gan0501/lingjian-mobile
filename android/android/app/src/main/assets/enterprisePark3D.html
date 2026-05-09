@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+    <title>企业园区3D场景</title>
+    <style>
+        :root {
+            --bg-color: #f4f7f9;
+            --cube-top: rgba(255, 255, 255, 0.95);
+            --cube-front: rgba(210, 218, 226, 0.7);
+            --cube-side: rgba(165, 177, 194, 0.5);
+            --accent-blue: #0066ff;
+            --grid-color: rgba(200, 210, 220, 0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            background: var(--bg-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            perspective: 3500px;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* 地面网格 - 使用3D变换使其与地面在同一平面 */
+        .ground-grid {
+            position: absolute;
+            width: 800px;
+            height: 800px;
+            left: 50%;
+            top: 80%;
+            transform: translate(-50%, -50%) rotateX(80deg) rotateZ(-45deg);
+            background-image:
+                linear-gradient(var(--grid-color) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .scene {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transform-style: preserve-3d;
+        }
+
+        .rotator {
+            position: absolute;
+            width: 0;
+            height: 0;
+            left: 50%;
+            top: 80%;
+            transform-style: preserve-3d;
+            transform: rotateX(80deg) rotateZ(-45deg) scale(0.4);
+        }
+
+        .building {
+            position: absolute;
+            width: var(--w);
+            height: var(--d);
+            transform-style: preserve-3d;
+            cursor: pointer;
+            transition: none;
+        }
+
+        .face {
+            position: absolute;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--accent-blue);
+            backface-visibility: hidden;
+        }
+
+        .bottom {
+            width: var(--w);
+            height: var(--d);
+            background: rgba(200, 200, 200, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .top {
+            width: var(--w);
+            height: var(--d);
+            background: var(--cube-top);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            border-top: 8px solid var(--accent-blue);
+            transform: translateZ(var(--h));
+        }
+
+        .front {
+            width: var(--w);
+            height: var(--h);
+            left: 0;
+            bottom: 0;
+            background: var(--cube-front);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            transform-origin: bottom;
+            transform: rotateX(-90deg);
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-start;
+            padding: 6px 8px;
+            font-size: 14px;
+            font-weight: bold;
+            color: var(--accent-blue);
+            text-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
+        }
+
+        .back {
+            width: var(--w);
+            height: var(--h);
+            left: 0;
+            top: 0;
+            background: var(--cube-front);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            transform-origin: top;
+            transform: rotateX(90deg);
+        }
+
+        .left {
+            width: var(--h);
+            height: var(--d);
+            left: 0;
+            top: 0;
+            background: var(--cube-side);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            transform-origin: left;
+            transform: rotateY(-90deg);
+        }
+
+        .right {
+            width: var(--h);
+            height: var(--d);
+            right: 0;
+            top: 0;
+            background: var(--cube-side);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            transform-origin: right;
+            transform: rotateY(90deg);
+        }
+
+        /* 建筑位置 - 整体下移使中心与机器人场景一致 */
+        .hq {
+            --w: 140px;
+            --d: 140px;
+            --h: 90px;
+            left: 0px;
+            top: -70px;
+            z-index: 10;
+        }
+
+        /* 生产车间 - 长度和宽度各增大一倍，位置调整避免碰撞 */
+        .factory {
+            --w: 360px;
+            --d: 240px;
+            --h: 21px;
+            left: -450px;
+            top: -350px;
+        }
+
+        /* 销售据点 - 宽高与采购中心一致 */
+        .sales {
+            --w: 240px;
+            --d: 120px;
+            --h: 30px;
+            left: -350px;
+            top: 150px;
+        }
+
+        .procure {
+            --w: 240px;
+            --d: 120px;
+            --h: 30px;
+            left: 210px;
+            top: 90px;
+        }
+
+        .admin {
+            --w: 280px;
+            --d: 100px;
+            --h: 30px;
+            left: 200px;
+            top: -220px;
+        }
+
+        .rd {
+            --w: 200px;
+            --d: 160px;
+            --h: 30px;
+            left: -50px;
+            top: -460px;
+        }
+
+        /* 连接线容器 */
+        .connection-lines {
+            position: absolute;
+            width: 0;
+            height: 0;
+            left: 0;
+            top: 0;
+            transform-style: preserve-3d;
+            pointer-events: none;
+        }
+
+        .connection-line {
+            position: absolute;
+            height: 10px;
+            background: repeating-linear-gradient(
+                90deg,
+                transparent,
+                transparent 8px,
+                rgba(0, 102, 255, 0.6) 8px,
+                rgba(0, 102, 255, 0.6) 16px
+            );
+            transform-origin: left center;
+            pointer-events: none;
+        }
+
+        /* 数据流动画 */
+        @keyframes dataFlow {
+            0% { background-position: 0 0; }
+            100% { background-position: 32px 0; }
+        }
+
+        .connection-line {
+            animation: dataFlow 1s linear infinite;
+        }
+
+        /* 弥散光效果 */
+        .glow-ring {
+            position: absolute;
+            border-radius: 50%;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .glow-ring.active {
+            opacity: 1;
+        }
+
+        @keyframes glowPulse {
+            0% { transform: scale(1); opacity: 0.8; }
+            100% { transform: scale(2); opacity: 0; }
+        }
+
+        .glow-ring::before,
+        .glow-ring::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 10px solid var(--accent-blue);
+            animation: glowPulse 1.5s ease-out infinite;
+        }
+
+        .glow-ring::after {
+            animation-delay: 0.5s;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="scene">
+        <div class="ground-grid"></div>
+        <div class="rotator" id="rotator">
+            <!-- 连接线容器 -->
+            <div class="connection-lines" id="connectionLines"></div>
+            
+            <div class="building hq" data-name="总部大楼">
+                <div class="face bottom"></div>
+                <div class="face front">总部大楼</div>
+                <div class="face back"></div>
+                <div class="face left"></div>
+                <div class="face right"></div>
+                <div class="face top">总部大楼</div>
+                <div class="glow-ring"></div>
+            </div>
+
+            <div class="building factory" data-name="生产车间">
+                <div class="face bottom"></div>
+                <div class="face front">生产车间</div>
+                <div class="face back"></div>
+                <div class="face left"></div>
+                <div class="face right"></div>
+                <div class="face top">生产车间</div>
+                <div class="glow-ring"></div>
+            </div>
+
+            <div class="building sales" data-name="销售据点">
+                <div class="face bottom"></div>
+                <div class="face front">销售据点</div>
+                <div class="face back"></div>
+                <div class="face left"></div>
+                <div class="face right"></div>
+                <div class="face top">销售据点</div>
+                <div class="glow-ring"></div>
+            </div>
+
+            <div class="building procure" data-name="采购中心">
+                <div class="face bottom"></div>
+                <div class="face front">采购中心</div>
+                <div class="face back"></div>
+                <div class="face left"></div>
+                <div class="face right"></div>
+                <div class="face top">采购中心</div>
+                <div class="glow-ring"></div>
+            </div>
+
+            <div class="building admin" data-name="行政大厅">
+                <div class="face bottom"></div>
+                <div class="face front">行政大厅</div>
+                <div class="face back"></div>
+                <div class="face left"></div>
+                <div class="face right"></div>
+                <div class="face top">行政大厅</div>
+                <div class="glow-ring"></div>
+            </div>
+
+            <div class="building rd" data-name="研发中心">
+                <div class="face bottom"></div>
+                <div class="face front">研发中心</div>
+                <div class="face back"></div>
+                <div class="face left"></div>
+                <div class="face right"></div>
+                <div class="face top">研发中心</div>
+                <div class="glow-ring"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const rotator = document.getElementById('rotator');
+        const connectionLines = document.getElementById('connectionLines');
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+        let currentRotateZ = -45;
+        let currentRotateX = 80;
+        let startRotateZ = -45;
+        let startRotateX = 80;
+
+        // 默认视角（松手后回复）
+        const DEFAULT_Z = -45;
+        const DEFAULT_X = 80;
+
+        // 自动回正状态
+        let resetState = {
+            active: false,
+            delayTimer: null,
+            startTime: 0,
+            duration: 1000,
+            fromZ: -45,
+            fromX: 80
+        };
+
+        function cancelReset() {
+            if (resetState.delayTimer) {
+                clearTimeout(resetState.delayTimer);
+                resetState.delayTimer = null;
+            }
+            resetState.active = false;
+        }
+
+        function scheduleReset() {
+            cancelReset();
+            resetState.delayTimer = setTimeout(function() {
+                resetState.fromZ = currentRotateZ;
+                resetState.fromX = currentRotateX;
+                resetState.startTime = performance.now();
+                resetState.active = true;
+            }, 2000);
+        }
+
+        function updateRotation() {
+            rotator.style.transform = `rotateX(${currentRotateX}deg) rotateZ(${currentRotateZ}deg) scale(0.4)`;
+        }
+
+        // 鼠标事件
+        document.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startRotateZ = currentRotateZ;
+            startRotateX = currentRotateX;
+            document.body.style.cursor = 'grabbing';
+            cancelReset();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
+            currentRotateZ = startRotateZ - deltaX * 0.5;
+            currentRotateX = Math.max(45, Math.min(90, startRotateX - deltaY * 0.3));
+            updateRotation();
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            document.body.style.cursor = 'default';
+            scheduleReset();
+        });
+
+        document.addEventListener('mouseleave', () => {
+            isDragging = false;
+            document.body.style.cursor = 'default';
+            scheduleReset();
+        });
+
+        // 触摸事件
+        document.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            startRotateZ = currentRotateZ;
+            startRotateX = currentRotateX;
+            cancelReset();
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const deltaX = e.touches[0].clientX - startX;
+            const deltaY = e.touches[0].clientY - startY;
+            currentRotateZ = startRotateZ - deltaX * 0.5;
+            currentRotateX = Math.max(45, Math.min(90, startRotateX - deltaY * 0.3));
+            updateRotation();
+        });
+
+        document.addEventListener('touchend', () => {
+            isDragging = false;
+            scheduleReset();
+        });
+
+        // 自动回正动画
+        function animateReset() {
+            requestAnimationFrame(animateReset);
+
+            if (resetState.active) {
+                const elapsed = performance.now() - resetState.startTime;
+                const t = Math.min(elapsed / resetState.duration, 1);
+                // easeInOutCubic 缓动
+                const ease = t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1;
+                currentRotateZ = resetState.fromZ + (DEFAULT_Z - resetState.fromZ) * ease;
+                currentRotateX = resetState.fromX + (DEFAULT_X - resetState.fromX) * ease;
+                updateRotation();
+                if (t >= 1) resetState.active = false;
+            }
+        }
+        animateReset();
+
+        // 建筑点击效果 - 弥散光
+        const buildings = document.querySelectorAll('.building');
+        let activeGlow = null;
+
+        buildings.forEach(building => {
+            building.addEventListener('click', (e) => {
+                e.stopPropagation();
+                
+                // 移除之前的激活状态
+                if (activeGlow) {
+                    activeGlow.classList.remove('active');
+                }
+
+                const glowRing = building.querySelector('.glow-ring');
+                if (glowRing === activeGlow) {
+                    activeGlow = null;
+                    return;
+                }
+
+                // 设置新的激活状态
+                const w = parseInt(getComputedStyle(building).getPropertyValue('--w'));
+                const d = parseInt(getComputedStyle(building).getPropertyValue('--d'));
+                const size = Math.max(w, d) * 1.2;
+                
+                glowRing.style.width = size + 'px';
+                glowRing.style.height = size + 'px';
+                glowRing.style.left = (w - size) / 2 + 'px';
+                glowRing.style.top = (d - size) / 2 + 'px';
+                glowRing.classList.add('active');
+                activeGlow = glowRing;
+            });
+        });
+
+        // 点击空白处关闭光效
+        document.addEventListener('click', () => {
+            if (activeGlow) {
+                activeGlow.classList.remove('active');
+                activeGlow = null;
+            }
+        });
+
+        // 创建连接线（从各建筑到总部大楼）- 正交方式（90°横线或竖线）
+        function createConnectionLines() {
+            const hq = document.querySelector('.hq');
+            const hqLeft = parseInt(getComputedStyle(hq).left);
+            const hqTop = parseInt(getComputedStyle(hq).top);
+            const hqW = 140;
+            const hqD = 140;
+            // 总部大楼中心点
+            const hqCx = hqLeft + hqW / 2;
+            const hqCy = hqTop + hqD / 2;
+
+            const otherBuildings = document.querySelectorAll('.building:not(.hq)');
+
+            otherBuildings.forEach(building => {
+                const left = parseInt(getComputedStyle(building).left);
+                const top = parseInt(getComputedStyle(building).top);
+                const w = parseInt(getComputedStyle(building).getPropertyValue('--w'));
+                const d = parseInt(getComputedStyle(building).getPropertyValue('--d'));
+
+                // 计算建筑中心
+                const cx = left + w / 2;
+                const cy = top + d / 2;
+
+                // 计算到总部大楼的方向
+                const dx = hqCx - cx;
+                const dy = hqCy - cy;
+
+                // 确定建筑连接点（边缘中点）
+                let startX, startY;
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    // 水平方向为主
+                    if (dx > 0) {
+                        startX = left + w; // 右边
+                        startY = top + d / 2;
+                    } else {
+                        startX = left; // 左边
+                        startY = top + d / 2;
+                    }
+                } else {
+                    // 垂直方向为主
+                    if (dy > 0) {
+                        startX = left + w / 2; // 下边
+                        startY = top + d;
+                    } else {
+                        startX = left + w / 2; // 上边
+                        startY = top;
+                    }
+                }
+
+                // 总部大楼的连接点 - 始终在边的中心
+                let endX, endY;
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    // 水平方向为主，连接到总部大楼的左边或右边的中心
+                    if (dx > 0) {
+                        endX = hqLeft; // 左边
+                        endY = hqTop + hqD / 2; // 边的中心
+                    } else {
+                        endX = hqLeft + hqW; // 右边
+                        endY = hqTop + hqD / 2; // 边的中心
+                    }
+                } else {
+                    // 垂直方向为主，连接到总部大楼的上边或下边的中心
+                    if (dy > 0) {
+                        endX = hqLeft + hqW / 2; // 边的中心
+                        endY = hqTop; // 上边
+                    } else {
+                        endX = hqLeft + hqW / 2; // 边的中心
+                        endY = hqTop + hqD; // 下边
+                    }
+                }
+
+                // 创建正交连接线（两段：先横后竖或先竖后横）
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    // 先水平后垂直
+                    // 第一段：水平线
+                    const line1 = document.createElement('div');
+                    line1.className = 'connection-line';
+                    line1.style.width = Math.abs(endX - startX) + 'px';
+                    line1.style.left = Math.min(startX, endX) + 'px';
+                    line1.style.top = startY + 'px';
+                    line1.style.transform = 'translateY(-1px)';
+                    connectionLines.appendChild(line1);
+
+                    // 第二段：垂直线
+                    const line2 = document.createElement('div');
+                    line2.className = 'connection-line';
+                    line2.style.width = Math.abs(endY - startY) + 'px';
+                    line2.style.left = endX + 'px';
+                    line2.style.top = Math.min(startY, endY) + 'px';
+                    line2.style.transform = 'rotateZ(90deg) translateY(-1px)';
+                    connectionLines.appendChild(line2);
+                } else {
+                    // 先垂直后水平
+                    // 第一段：垂直线
+                    const line1 = document.createElement('div');
+                    line1.className = 'connection-line';
+                    line1.style.width = Math.abs(endY - startY) + 'px';
+                    line1.style.left = startX + 'px';
+                    line1.style.top = Math.min(startY, endY) + 'px';
+                    line1.style.transform = 'rotateZ(90deg) translateY(-1px)';
+                    connectionLines.appendChild(line1);
+
+                    // 第二段：水平线
+                    const line2 = document.createElement('div');
+                    line2.className = 'connection-line';
+                    line2.style.width = Math.abs(endX - startX) + 'px';
+                    line2.style.left = Math.min(startX, endX) + 'px';
+                    line2.style.top = endY + 'px';
+                    line2.style.transform = 'translateY(-1px)';
+                    connectionLines.appendChild(line2);
+                }
+            });
+        }
+
+        // 初始化连接线
+        createConnectionLines();
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,107 @@
+apply plugin: "com.android.application"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "com.facebook.react"
+
+react {
+    // React Native配置
+}
+
+def enableProguardInReleaseBuilds = false
+
+android {
+    ndkVersion rootProject.ext.ndkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
+
+    namespace "com.lingjianai"
+
+    sourceSets {
+        main {
+            java.srcDirs += ["$buildDir/generated/rncli/src/main/java"]
+        }
+    }
+    
+    defaultConfig {
+        applicationId "uni.UNID99084D"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 500
+        versionName "5.0.0"
+        
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
+        
+        missingDimensionStrategy 'react-native-camera', 'general'
+    }
+
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+
+        release {
+            // 从 local.properties 读取签名配置
+            // 请勿将 local.properties 提交到版本控制
+            def localProps = new Properties()
+            def localPropsFile = rootProject.file('local.properties')
+            if (localPropsFile.exists()) {
+                localPropsFile.withInputStream { localProps.load(it) }
+            }
+            storeFile file(localProps.getProperty('RELEASE_STORE_FILE', 'release.keystore'))
+            storePassword localProps.getProperty('RELEASE_STORE_PASSWORD', '')
+            keyAlias localProps.getProperty('RELEASE_KEY_ALIAS', '')
+            keyPassword localProps.getProperty('RELEASE_KEY_PASSWORD', '')
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+dependencies {
+    implementation("com.facebook.react:react-android")
+
+    if (hermesEnabled.toBoolean()) {
+        implementation("com.facebook.react:hermes-android")
+    } else {
+        implementation jscFlavor
+    }
+
+    // Google Play Services Location - react-native-geolocation-service 必需
+    implementation 'com.google.android.gms:play-services-location:21.0.1'
+
+    // 高德地图 (3dmap已包含定位功能，无需单独引入location)
+    implementation 'com.amap.api:3dmap:10.0.600'
+    
+    // react-native-amap3d
+    implementation project(':react-native-amap3d')
+    
+    // 支付宝 SDK
+    implementation(files("libs/alipaySdk-15.7.5-20200422171619.aar"))
+    
+    // NanoHTTPD - lightweight embedded HTTP server for serving assets to WebView
+    implementation 'org.nanohttpd:nanohttpd:2.3.1'
+
+    // Watermark Camera dependencies
+    implementation 'com.alibaba:fastjson:1.2.83'
+    implementation 'androidx.exifinterface:exifinterface:1.3.4'
+    implementation 'androidx.recyclerview:recyclerview:1.3.0'
+    
+    // 微信 SDK
+    implementation 'com.tencent.mm.opensdk:wechat-sdk-android:6.8.0'
+}
+
+apply from: file("../../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
+applyNativeModulesAppBuildGradle(project)

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>对比报告</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',sans-serif;background:#1a1a1a}
+
+.slide-container{width:100%;height:100%;position:relative;overflow:hidden}
+.slide{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  padding:32px 24px 80px;
+  display:flex;flex-direction:column;justify-content:flex-start;
+  opacity:0;transform:translateX(100%);transition:all .4s cubic-bezier(.4,0,.2,1);
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
+  background:linear-gradient(135deg,#ffffff 0%,#f8f9fa 100%);
+}
+.slide.active{opacity:1;transform:translateX(0)}
+.slide.prev{opacity:0;transform:translateX(-100%)}
+
+/* 封面页 */
+.slide.cover{
+  background:linear-gradient(135deg,#80011A 0%,#B20000 50%,#d4380d 100%);
+  justify-content:center;align-items:center;text-align:center;
+  padding:60px 24px 80px;
+}
+.slide.cover h1{color:#fff;font-size:26px;margin-bottom:24px;line-height:1.4;font-weight:700;letter-spacing:2px}
+.slide.cover h2{color:rgba(255,255,255,.85);font-size:16px;font-weight:400;margin-bottom:8px}
+.slide.cover p{color:rgba(255,255,255,.8);font-size:14px;line-height:2.2;text-align:center;margin-bottom:2px}
+.slide.cover .cover-date{font-size:15px;color:#fff;margin-top:12px;margin-bottom:32px;font-weight:500}
+
+/* 加载或空白提示 */
+.slide.empty{
+  background:linear-gradient(135deg,#2c2c2c 0%,#1a1a1a 100%);
+  justify-content:center;align-items:center;text-align:center;color:#fff;
+}
+
+/* 正文页 */
+.slide h1{color:#80011A;font-size:20px;margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid #B20000}
+.slide h2{color:#333;font-size:17px;margin:14px 0 10px;padding-left:10px;border-left:3px solid #B20000}
+.slide h3{color:#555;font-size:15px;margin:12px 0 8px}
+.slide p{color:#444;font-size:13px;line-height:1.8;margin-bottom:8px}
+.slide ul,.slide ol{color:#444;font-size:13px;line-height:1.8;margin:6px 0 10px 18px}
+.slide li{margin-bottom:4px}
+.slide strong{color:#B20000}
+.slide em{font-style:italic;color:#666}
+
+/* 表格 */
+.slide table{
+  width:100%;border-collapse:collapse;margin:10px 0;font-size:12px;
+}
+.slide thead{background:#80011A}
+.slide th{color:#fff;padding:8px 6px;text-align:center;font-weight:600;white-space:nowrap}
+.slide td{padding:6px;text-align:center;border-bottom:1px solid #eee;color:#333}
+.slide tbody tr:nth-child(even){background:#f9f9f9}
+.slide tbody tr:hover{background:#fff3f0}
+
+/* 代码块/计算书 — 文档风格（适合打印） */
+.slide pre{
+  background:#f5f5f5;color:#333;padding:12px;border-radius:8px;
+  font-size:12px;line-height:1.6;overflow-x:auto;margin:8px 0;
+  border:1px solid #e0e0e0;
+}
+.slide code{
+  background:rgba(178,0,0,.08);color:#B20000;padding:1px 4px;border-radius:3px;
+  font-size:12px;
+}
+.slide pre code{background:transparent;color:#333;padding:0}
+
+/* 嵌入图片 */
+.slide figure.report-figure{
+  margin:12px 0;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;
+  background:#f9f9f9;
+}
+.slide figure.report-figure .fig-title{
+  background:#80011A;color:#fff;padding:8px 12px;font-size:13px;font-weight:600;
+}
+.slide figure.report-figure img{
+  display:block;width:100%;max-height:400px;object-fit:contain;padding:8px;
+  background:#fff;
+}
+.slide figure.report-figure .fig-placeholder{
+  display:flex;align-items:center;justify-content:center;
+  height:120px;color:#999;font-size:13px;background:#f5f5f5;
+}
+
+
+/* 底部导航栏 */
+.nav-bar{
+  position:fixed;bottom:0;left:0;right:0;
+  height:56px;
+  background:rgba(26,26,26,.95);
+  backdrop-filter:blur(10px);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;
+  border-top:1px solid rgba(255,255,255,.1);
+  z-index:999;
+}
+.nav-btn{
+  width:40px;height:40px;border-radius:20px;border:none;
+  background:rgba(255,255,255,.12);color:#fff;font-size:18px;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  transition:background .2s;
+  -webkit-tap-highlight-color:transparent;
+  outline:none;
+}
+.nav-btn:active{background:rgba(178,0,0,.6)}
+.nav-btn:disabled{opacity:.3}
+.nav-info{
+  color:rgba(255,255,255,.7);font-size:13px;
+  display:flex;align-items:center;gap:8px;
+}
+.nav-dots{display:flex;gap:4px;align-items:center}
+.nav-dot{
+  width:6px;height:6px;border-radius:3px;
+  background:rgba(255,255,255,.25);transition:all .3s;
+}
+.nav-dot.active{width:18px;background:#B20000}
+.page-num{color:rgba(255,255,255,.5);font-size:12px}
+
+/* blockquote for hints */
+.slide blockquote{
+  border-left:3px solid #B20000;padding:8px 12px;margin:8px 0;
+  background:rgba(178,0,0,.05);color:#666;font-size:12px;line-height:1.6;
+}
+</style>
+</head>
+<body>
+<div class="slide-container" id="container">
+  <div class="slide empty active">
+    <h3>加载中...</h3>
+  </div>
+</div>
+
+<div class="nav-bar">
+  <button class="nav-btn" id="prevBtn" onclick="prevSlide()">‹</button>
+  <div class="nav-info">
+    <div class="nav-dots" id="dots"></div>
+    <span class="page-num" id="pageNum"></span>
+  </div>
+  <button class="nav-btn" id="nextBtn" onclick="nextSlide()">›</button>
+</div>
+
+<script src="marked.min.js"></script>
+<script>
+let slides=[];
+let current=0;
+
+// Remove emojis as required
+function stripEmoji(text) {
+  return text.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1FA00}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}\u{2702}-\u{27B0}\u{2934}-\u{2935}\u{25AA}-\u{25FE}\u{2B05}-\u{2B55}\u{3030}\u{303D}\u{3297}\u{3299}]/gu, '');
+}
+
+function processFigureMarkers(md) {
+  var result = '';
+  var pos = 0;
+  while (pos < md.length) {
+    var start = md.indexOf('[[FIGURE:', pos);
+    if (start === -1) { result += md.substring(pos); break; }
+    result += md.substring(pos, start);
+    var end = md.indexOf(']]', start);
+    if (end === -1) { result += md.substring(pos); break; }
+    var inner = md.substring(start + 9, end);
+    var parts = inner.split('|');
+    var title = (parts[0] || '').trim();
+    var url = '';
+    for (var pi = 1; pi < parts.length; pi++) {
+      var p = parts[pi];
+      if (p.indexOf('url=') === 0) {
+        url = parts.slice(pi).join('|').substring(4).trim();
+        break;
+      }
+    }
+    if (url) {
+      result += '<figure class="report-figure"><div class="fig-title">' + title + '</div><img src="' + url + '" alt="' + title + '"/></figure>';
+    } else {
+      result += '<figure class="report-figure"><div class="fig-title">' + title + '</div><div class="fig-placeholder">（图片待补充）</div></figure>';
+    }
+    pos = end + 2;
+  }
+  return result;
+}
+
+function initSlides(markdown){
+  const raw=String(markdown||'');
+  const cleaned=raw.replace(/^---\s*\nmarp:\s*true[\s\S]*?\n---\s*\n/,'');
+  const noEmoji = stripEmoji(cleaned);
+  const withFigures = processFigureMarkers(noEmoji);
+  const parts=withFigures.split(/\n---\s*\n/).map(s=>s.trim()).filter(s=>s.length>0);
+  if(parts.length===0)parts.push(raw);
+
+  const container=document.getElementById('container');
+  container.innerHTML='';
+  slides=[];
+
+  parts.forEach((md,i)=>{
+    const div=document.createElement('div');
+    div.className='slide'+(i===0?' active':'');
+    
+    // Check if it's the cover page
+    const lines=md.split('\n').filter(l=>l.trim());
+    const hasTitle = /桩基选型方案报告/.test(md) || /^#\s/.test(lines[0]||'');
+    const isCover = i===0 && hasTitle && lines.length<=15;
+    if(isCover) div.classList.add('cover');
+    
+    div.innerHTML=marked.parse(md);
+
+    // Make sure 编制日期 gets the date style
+    if(isCover){
+      var ps = div.querySelectorAll('p');
+      for(var pi=0; pi<ps.length; pi++){
+        var pText = ps[pi].textContent || '';
+        if(pText.indexOf('编制日期')>=0){
+          ps[pi].classList.add('cover-date');
+        }
+      }
+    }
+
+    container.appendChild(div);
+    slides.push(div);
+  });
+
+  current=0;
+  
+  // Send message to React Native about how many slides there are
+  if (window.ReactNativeWebView) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: 'slidesReady',
+      total: slides.length,
+      current: current
+    }));
+  }
+}
+
+function goToSlide(n){
+  if(n<0||n>=slides.length)return;
+  slides.forEach((s,i)=>{
+    s.className='slide';
+    if(i===n)s.classList.add('active');
+    else if(i<n)s.classList.add('prev');
+    if(i===0) s.classList.add('cover');
+  });
+  current=n;
+  if (window.ReactNativeWebView) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: 'slideChanged',
+      current: current
+    }));
+  }
+  // Update dots
+  var dotsContainer = document.getElementById('dots');
+  if (dotsContainer) {
+    dotsContainer.innerHTML = '';
+    for(var i=0; i<slides.length; i++) {
+      var dot = document.createElement('div');
+      dot.className = 'nav-dot' + (i === n ? ' active' : '');
+      dotsContainer.appendChild(dot);
+    }
+  }
+  // Update page num
+  var pageNum = document.getElementById('pageNum');
+  if (pageNum) pageNum.innerText = (n + 1) + ' / ' + slides.length;
+}
+
+function prevSlide(){goToSlide(current-1)}
+function nextSlide(){goToSlide(current+1)}
+
+// Handle messages from React Native
+window.addEventListener('message', function(event) {
+  try {
+    const data = JSON.parse(event.data);
+    if (data.type === 'loadMarkdown') {
+      initSlides(data.content);
+    } else if (data.type === 'goToSlide') {
+      goToSlide(data.index);
+    } else if (data.type === 'nextSlide') {
+      nextSlide();
+    } else if (data.type === 'prevSlide') {
+      prevSlide();
+    }
+  } catch(e) {}
+});
+
+window.loadMarkdown = function(md) {
+  initSlides(md);
+};
+
+let touchStartX=0,touchStartY=0;
+document.addEventListener('touchstart',e=>{
+  touchStartX=e.touches[0].clientX;
+  touchStartY=e.touches[0].clientY;
+});
+document.addEventListener('touchend',e=>{
+  const dx=e.changedTouches[0].clientX-touchStartX;
+  const dy=e.changedTouches[0].clientY-touchStartY;
+  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>50){
+    if(dx<0)nextSlide();
+    else prevSlide();
+  }
+});
+</script>
+</body>
+</html>

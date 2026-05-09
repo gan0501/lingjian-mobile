@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#060a12;overflow:hidden;width:100vw;height:100vh;}
+canvas{display:block;}
+#status{
+  position:fixed;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  color:rgba(180,200,255,0.6);
+  font:13px sans-serif;text-align:center;
+}
+</style>
+</head>
+<body>
+<div id="status">⏳ 载入太空数字舱...</div>
+<script>
+var AGENTS = [];
+
+function listenMessages(cb){
+  function parse(e){ try{ var m=JSON.parse(e.data); if(m.type==='UPDATE_AGENTS') cb(m.agents); }catch(x){} }
+  window.addEventListener('message',parse);
+  document.addEventListener('message',parse);
+}
+
+var globalTime = 0;
+
+function initScene(){
+  document.getElementById('status').style.display='none';
+  var W=window.innerWidth, H=window.innerHeight;
+
+  // ── Renderer ───────────────────────────────────────────────
+  var renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.setSize(W,H);
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  var scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x060a14); // Very dark space blue
+
+  // ── Isometric camera ────────────────────────────────────────
+  // Zoom in a bit more to remove excessive void space
+  var aspect=W/H, sz=5.5; 
+  var camera=new THREE.OrthographicCamera(-sz*aspect,sz*aspect,sz,-sz,0.1,100);
+  camera.position.set(12,14,12);
+  camera.lookAt(0,0,0);
+
+  // ── Lighting ──────────────────────────────────────────────────
+  scene.add(new THREE.AmbientLight(0x2a3b5c, 1.2)); 
+  var sun=new THREE.DirectionalLight(0x88bbff, 1.5);
+  sun.position.set(10, 20, 8);
+  sun.castShadow=true;
+  sun.shadow.mapSize.width=1024; sun.shadow.mapSize.height=1024;
+  var sc=sun.shadow.camera;
+  sc.left=-12;sc.right=12;sc.top=12;sc.bottom=-12;sc.near=0.5;sc.far=50;
+  sun.shadow.bias = -0.001;
+  scene.add(sun);
+
+  var fill=new THREE.DirectionalLight(0x3366cc, 0.8);
+  fill.position.set(-8, 6, -8); 
+  scene.add(fill);
+  
+  var redUnder=new THREE.PointLight(0xff1a33, 0.6, 15);
+  redUnder.position.set(4, 1, 4); 
+  scene.add(redUnder);
+
+  // ── Helpers ─────────────────────────────────────────────────
+  function box(w,h,d,color){
+    var m=new THREE.Mesh(
+      new THREE.BoxGeometry(w,h,d),
+      new THREE.MeshLambertMaterial({color:color})
+    );
+    m.castShadow=true; m.receiveShadow=true;
+    return m;
+  }
+
+  // ── Floor and Architecture ──────────────────────────────────
+  // Make floor much tighter so it doesn't look like a giant void
+  var floor=new THREE.Mesh(
+    new THREE.PlaneGeometry(16,16),
+    new THREE.MeshLambertMaterial({color:0x0c1020})
+  );
+  floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
+  
+  var gridH=new THREE.GridHelper(16,16,0x1a2545,0x111830);
+  gridH.position.y=0.01; scene.add(gridH);
+
+  // Red floor accent lines framing the central area
+  function makeFloorLine(x1,z1,x2,z2){
+    var pts=[new THREE.Vector3(x1,0.02,z1),new THREE.Vector3(x2,0.02,z2)];
+    var geo=new THREE.BufferGeometry().setFromPoints(pts);
+    var mat=new THREE.LineBasicMaterial({color:0xff2233,transparent:true,opacity:0.4});
+    scene.add(new THREE.Line(geo,mat));
+  }
+  makeFloorLine(-7, 7, 7, 7);
+  makeFloorLine(-7, -7, 7, -7);
+  makeFloorLine(-7, -7, -7, 7);
+  makeFloorLine(7, -7, 7, 7);
+
+  // Tight enclosing walls
+  var wallM=new THREE.MeshLambertMaterial({color:0x0e1525});
+  var bw=new THREE.Mesh(new THREE.BoxGeometry(16,7,0.2),wallM);
+  bw.position.set(0,3.5,-8.1); bw.receiveShadow=true; scene.add(bw);
+  var lw=new THREE.Mesh(new THREE.BoxGeometry(0.2,7,16),wallM);
+  lw.position.set(-8.1,3.5,0); lw.receiveShadow=true; scene.add(lw);
+
+  // ── Red LED strips on walls ──────────────────────────────────
+  function makeLedStrip(x,y,z,w,h,d){
+    var led=new THREE.Mesh(
+      new THREE.BoxGeometry(w,h,d),
+      new THREE.MeshBasicMaterial({color:0xff1a2e})
+    );
+    led.position.set(x,y,z); scene.add(led);
+  }
+  makeLedStrip(0,0.15,-8.01,16,0.04,0.04);
+  makeLedStrip(-8.01,0.15,0,0.04,0.04,16);
+  makeLedStrip(0,6.5,-8.01,16,0.04,0.04);
+  makeLedStrip(-8.01,6.5,0,0.04,0.04,16);
+
+  // ══════════════════════════════════════════════════════════
+  // ██ DISPLAY SCREENS (Moved tighter together and closer)
+  // ══════════════════════════════════════════════════════════
+  var SCREEN_COLS=5, SCREEN_ROWS=2;
+  var SCREEN_W=2.6, SCREEN_H=1.5;
+  var SCREEN_GAP_X=0.1, SCREEN_GAP_Y=0.1;
+  // Shifted them closely to the back wall
+  var SCREEN_ORIGIN_X=-5.4;
+  var SCREEN_ORIGIN_Y=2.0;
+  var SCREEN_Z=-6.2;
+
+  var screens=[];
+  var SCREEN_LABELS=[
+    '投标标书编写中','桩基报告对比中','项目数据分分析中','客户数据分析中','厂家数据分析中',
+    '待命中','待命中','待命中','待命中','待命中'
+  ];
+
+  function makeScreenCanvas(text,isActive){
+    var c=document.createElement('canvas');
+    c.width=512; c.height=256;
+    var ctx=c.getContext('2d');
+
+    if(isActive){
+      var grad=ctx.createLinearGradient(0,0,0,256);
+      grad.addColorStop(0,'#0a1628');
+      grad.addColorStop(1,'#0d1f3c');
+      ctx.fillStyle=grad;
+      ctx.fillRect(0,0,512,256);
+      ctx.strokeStyle='rgba(40,80,160,0.15)';
+      ctx.lineWidth=1;
+      for(var i=0;i<256;i+=4){
+        ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(512,i); ctx.stroke();
+      }
+      ctx.fillStyle='#ff1a2e'; ctx.fillRect(20,15,472,2);
+      ctx.fillStyle='#00ddff';
+      ctx.font='bold 36px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.shadowColor='#00aaff'; ctx.shadowBlur=15;
+      ctx.fillText(text,256,120);
+      ctx.shadowBlur=0;
+      ctx.fillStyle='rgba(0,180,255,0.2)'; ctx.fillRect(80,170,352,12);
+      ctx.fillStyle='#00aaff'; ctx.fillRect(80,170,80+Math.random()*280,12);
+      ctx.fillStyle='#00ff88'; ctx.beginPath(); ctx.arc(100,220,5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(0,255,136,0.8)'; ctx.font='14px sans-serif'; ctx.textAlign='left'; ctx.fillText('运行中',115,225);
+    } else {
+      ctx.fillStyle='#060a12'; ctx.fillRect(0,0,512,256);
+      ctx.strokeStyle='rgba(20,30,60,0.4)'; ctx.lineWidth=1;
+      for(var gi=0;gi<512;gi+=32){
+        ctx.beginPath(); ctx.moveTo(gi,0); ctx.lineTo(gi,256); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,gi%256); ctx.lineTo(512,gi%256); ctx.stroke();
+      }
+      ctx.fillStyle='rgba(60,80,120,0.3)'; ctx.font='24px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('STANDBY',256,128);
+    }
+    return new THREE.CanvasTexture(c);
+  }
+
+  for(var row=0;row<SCREEN_ROWS;row++){
+    for(var col=0;col<SCREEN_COLS;col++){
+      var si=row*SCREEN_COLS+col;
+      var sx=SCREEN_ORIGIN_X+col*(SCREEN_W+SCREEN_GAP_X);
+      var sy=SCREEN_ORIGIN_Y+(SCREEN_ROWS-1-row)*(SCREEN_H+SCREEN_GAP_Y);
+
+      var frame=box(SCREEN_W+0.1, SCREEN_H+0.1, 0.2, 0x121824);
+      var angle = 0;
+      var zOffset = SCREEN_Z;
+      if (col < 1) { angle = Math.PI/16; zOffset += 0.3; }
+      else if (col > 3) { angle = -Math.PI/16; zOffset += 0.3; }
+
+      frame.position.set(sx, sy, zOffset); 
+      frame.rotation.y = angle;
+      scene.add(frame);
+
+      var screenTex=makeScreenCanvas(SCREEN_LABELS[si]||'STANDBY',false);
+      var screenMat=new THREE.MeshBasicMaterial({map:screenTex});
+      var screenMesh=new THREE.Mesh(new THREE.PlaneGeometry(SCREEN_W-0.1,SCREEN_H-0.1),screenMat);
+      screenMesh.position.set(sx, sy, zOffset+0.11); 
+      screenMesh.rotation.y = angle;
+      scene.add(screenMesh);
+
+      var glowLight=new THREE.PointLight(0x00aaff, 0, 4);
+      glowLight.position.set(sx, sy, zOffset+1.0); 
+      scene.add(glowLight);
+
+      screens.push({
+        frame:frame, screenMesh:screenMesh, screenMat:screenMat,
+        glowLight:glowLight, col:col, row:row, idx:si,
+        x:sx, y:sy, z:zOffset, angle:angle
+      });
+    }
+  }
+
+  function getScreenStandPos(screenIdx){
+    var scr=screens[screenIdx];
+    var d = 1.8; // Stand closer to screen
+    return {
+      x: scr.x + Math.sin(scr.angle) * d, 
+      z: scr.z + Math.cos(scr.angle) * d
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // ██ STANDBY CAPSULES (Moved tightly into the capsule array)
+  // ══════════════════════════════════════════════════════════
+  var STANDBY_ORIGIN_X=4.0;
+  var STANDBY_Z= -1.5;
+  var STANDBY_COL_GAP=1.4;
+  var STANDBY_ROW_GAP=1.2;
+  var standbySlots=[];
+
+  var capM = new THREE.MeshStandardMaterial({color:0x1b2336, metalness:0.6, roughness:0.4});
+  var glassM = new THREE.MeshBasicMaterial({color:0x0088ff, transparent:true, opacity:0.15});
+
+  for(var sr=0;sr<2;sr++){
+    for(var sc=0;sc<5;sc++){
+      var idx=sr*5+sc;
+      var cx = STANDBY_ORIGIN_X + sr*STANDBY_ROW_GAP;
+      var cz = STANDBY_Z + sc*STANDBY_COL_GAP;
+      
+      var base=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.55,0.15,12), capM);
+      base.position.set(cx,0.075,cz); scene.add(base);
+
+      var ring=new THREE.Mesh(new THREE.TorusGeometry(0.45,0.04,4,16), new THREE.MeshBasicMaterial({color:0x00ddff}));
+      ring.rotation.x=-Math.PI/2; ring.position.set(cx,0.15,cz); scene.add(ring);
+
+      var glowG=new THREE.Mesh(new THREE.CylinderGeometry(0.48,0.48,2.2,16), glassM);
+      glowG.position.set(cx, 1.25, cz);
+      scene.add(glowG);
+
+      standbySlots.push({ x:cx, z:cz });
+    }
+  }
+
+  // ── CHARACTERS ──────────────────────────────────────────────
+  var chars=[];
+
+  function createNameCanvas(name, isWorking){
+    var c=document.createElement('canvas');
+    c.width=256; c.height=64;
+    var ctx=c.getContext('2d');
+    ctx.shadowColor=isWorking?'#00ddff':'#aaaaaa'; ctx.shadowBlur=10;
+    ctx.fillStyle=isWorking?'#00ddff':'#ffffff';
+    ctx.font='bold 34px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(name||'Agent',128,32);
+    return new THREE.CanvasTexture(c);
+  }
+
+  function makeBot(agent, tgt, idx){
+    var g=new THREE.Group();
+    var isW=agent.status==='working';
+    var matL=new THREE.MeshLambertMaterial({color:0xf0f5ff});
+    var matD=new THREE.MeshLambertMaterial({color:0x223344});
+    var accCol=parseInt((agent.color||'#3b82f6').replace('#',''),16);
+    
+    var bdy=box(0.3,0.6,0.25,0xf0f5ff); bdy.position.y=0.8; g.add(bdy);
+    var head=box(0.22,0.22,0.22,0xf0f5ff); head.position.y=1.2; g.add(head);
+    var visor=box(0.18,0.06,0.04,isW?0x00aaff:0xff1a2e); visor.position.set(0,1.2,0.12); g.add(visor);
+    var core=box(0.15,0.15,0.04,accCol); core.position.set(0,0.85,0.13); g.add(core);
+    
+    var tagTex=createNameCanvas(agent.name,isW);
+    var tagPl=new THREE.Mesh(new THREE.PlaneGeometry(1.0,0.25), new THREE.MeshBasicMaterial({map:tagTex,transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+    var tGrp=new THREE.Group(); tGrp.add(tagPl); scene.add(tGrp);
+
+    g.position.set(tgt.x,0,tgt.z);
+    g.rotation.y = tgt.r;
+    tGrp.position.set(tgt.x,2.2,tgt.z); tGrp.rotation.y = tgt.r;
+    scene.add(g);
+
+    return { id:agent.id, agent:agent, mesh:g, tagGrp:tGrp, tgt:tgt, phase:Math.random()*10 };
+  }
+
+  function doSync(){
+    var old={}; chars.forEach(function(c){ old[c.id]=c; });
+    var nChars=[]; var used={};
+
+    screens.forEach(function(s){
+      s.screenMat.map=makeScreenCanvas('STANDBY',false);
+      s.screenMat.needsUpdate=true;
+      s.glowLight.intensity=0;
+    });
+
+    AGENTS.forEach(function(a,i){
+      if(i>=10) return;
+      var isW=a.status==='working';
+      var sPos = getScreenStandPos(i);
+      
+      var tgt={
+        x: isW ? sPos.x : standbySlots[i].x,
+        z: isW ? sPos.z : standbySlots[i].z,
+        r: isW ? Math.PI + screens[i].angle : -Math.PI/2
+      };
+
+      if(isW){
+        screens[i].screenMat.map=makeScreenCanvas(a.task||SCREEN_LABELS[i]||'处理中',true);
+        screens[i].screenMat.needsUpdate=true;
+        screens[i].glowLight.intensity=0.8;
+      }
+
+      if(old[a.id] && old[a.id].agent.status===a.status){
+        var c=old[a.id]; c.agent=a; c.tgt=tgt;
+        used[a.id]=true; nChars.push(c);
+      } else {
+        if(old[a.id]){ scene.remove(old[a.id].mesh); scene.remove(old[a.id].tagGrp); }
+        used[a.id]=true; nChars.push(makeBot(a,tgt,i));
+      }
+    });
+
+    chars.forEach(function(c){ if(!used[c.id]){ scene.remove(c.mesh); scene.remove(c.tagGrp); } });
+    chars=nChars;
+  }
+  doSync();
+
+  listenMessages(function(ag){ AGENTS=ag; doSync(); });
+
+  var lastTs=0, WS=2.5;
+  function rndr(ts){
+    requestAnimationFrame(rndr);
+    var dt=Math.min((ts-lastTs)*0.001,0.05); lastTs=ts;
+    
+    chars.forEach(function(c){
+      var dx=c.tgt.x-c.mesh.position.x, dz=c.tgt.z-c.mesh.position.z;
+      var dist=Math.sqrt(dx*dx+dz*dz);
+      if(dist>0.05){
+        c.mesh.position.x+=dx/dist*Math.min(WS*dt,dist);
+        c.mesh.position.z+=dz/dist*Math.min(WS*dt,dist);
+        var tgA=Math.atan2(dx,dz);
+        var da=(tgA-c.mesh.rotation.y)%(Math.PI*2);
+        if(da>Math.PI) da-=Math.PI*2; if(da<-Math.PI) da+=Math.PI*2;
+        c.mesh.rotation.y+=da*0.1;
+        c.phase+=dt*15;
+        c.mesh.position.y=0.1+Math.sin(c.phase)*0.08;
+      } else {
+        c.mesh.position.y=0;
+        var da=(c.tgt.r-c.mesh.rotation.y)%(Math.PI*2);
+        if(da>Math.PI) da-=Math.PI*2; if(da<-Math.PI) da+=Math.PI*2;
+        c.mesh.rotation.y+=da*0.15;
+      }
+      c.tagGrp.position.set(c.mesh.position.x,2.2,c.mesh.position.z);
+    });
+
+    renderer.render(scene,camera);
+  }
+  requestAnimationFrame(rndr);
+}
+
+var s=document.createElement('script');
+s.src='https://unpkg.com/three@0.155.0/build/three.min.js';
+s.onload=initScene;
+document.head.appendChild(s);
+</script>
+</body>
+</html>

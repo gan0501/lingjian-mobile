@@ -1,0 +1,165 @@
+diff --git a/node_modules/@supersami/rn-foreground-service/android/src/main/java/com/supersami/foregroundservice/ForegroundService.java b/node_modules/@supersami/rn-foreground-service/android/src/main/java/com/supersami/foregroundservice/ForegroundService.java
+index 9d7751d..438bb4e 100644
+--- a/node_modules/@supersami/rn-foreground-service/android/src/main/java/com/supersami/foregroundservice/ForegroundService.java
++++ b/node_modules/@supersami/rn-foreground-service/android/src/main/java/com/supersami/foregroundservice/ForegroundService.java
+@@ -80,7 +80,7 @@ public class ForegroundService extends Service {
+     private boolean startService(Bundle notificationConfig) {
+         try {
+             int id = (int) notificationConfig.getDouble("id");
+-            String foregroundServiceType = notificationConfig.getString("ServiceType");
++            String foregroundServiceType = notificationConfig.containsKey("ServiceType") ? notificationConfig.getString("ServiceType") : "dataSync";
+ 
+             Notification notification = NotificationHelper
+                 .getInstance(getApplicationContext())
+@@ -88,7 +88,11 @@ public class ForegroundService extends Service {
+ 
+             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                 // For Android 10 (API 29) and above
+-                startForeground(id, notification, getServiceTypeForAndroid10(foregroundServiceType));
++                try {
++                    startForeground(id, notification, getServiceTypeForAndroid10(foregroundServiceType));
++                } catch (IllegalArgumentException e) {
++                    startForeground(id, notification);
++                }
+             } else {
+                 // For older Android versions
+                 startForeground(id, notification);
+@@ -100,10 +104,11 @@ public class ForegroundService extends Service {
+ 
+         } catch (Exception e) {
+             if (reactContext != null) {
+-                Log.e("ForegroundService", "Failed to start service: " + e.getMessage());
++                String error = e.toString() + "`n" + Log.getStackTraceString(e);
++                Log.e("ForegroundService", "Failed to start service: " + error);
+                 reactContext
+                         .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+-                        .emit("onServiceError", e.getMessage());
++                        .emit("onServiceError", error);
+             }
+             return false;
+         }
+@@ -113,31 +118,31 @@ public class ForegroundService extends Service {
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+             switch (customServiceType) {
+                 case "camera":
+-                    return 8; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
++                    return 64; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                 case "connectedDevice":
+-                    return 32; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
++                    return 16; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                 case "dataSync":
+-                    return 16; // ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
++                    return 1; // ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                 case "health":
+-                    return 64; // ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
++                    return 256; // ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
+                 case "location":
+-                    return 1; // ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
++                    return 8; // ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                 case "mediaPlayback":
+                     return 2; // ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                 case "mediaProjection":
+-                    return 4; // ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
++                    return 32; // ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                 case "microphone":
+                     return 128; // ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                 case "phoneCall":
+-                    return 256; // ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
++                    return 4; // ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                 case "remoteMessaging":
+-                    return 1024; // ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
++                    return 512; // ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
+                 case "shortService":
+                     return 2048; // ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE
+                 case "specialUse":
+                     return 4096; // ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                 case "systemExempted":
+-                    return 8192; // ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
++                    return 1024; // ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
+                 default:
+                     return 1; // Default to location
+             }
+@@ -149,31 +154,31 @@ public class ForegroundService extends Service {
+         // Use direct integer constants instead of ServiceInfo constants
+         switch (customServiceType) {
+             case "camera":
+-                return 8; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
++                return 64; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+             case "connectedDevice":
+-                return 32; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
++                return 16; // ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+             case "dataSync":
+-                return 16; // ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
++                return 1; // ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+             case "health":
+-                return 64; // ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
++                return 256; // ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
+             case "location":
+-                return 1; // ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
++                return 8; // ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+             case "mediaPlayback":
+                 return 2; // ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+             case "mediaProjection":
+-                return 4; // ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
++                return 32; // ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+             case "microphone":
+                 return 128; // ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+             case "phoneCall":
+-                return 256; // ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
++                return 4; // ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+             case "remoteMessaging":
+-                return 1024; // ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
++                return 512; // ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
+             case "shortService":
+                 return 2048; // ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE
+             case "specialUse":
+                 return 4096; // ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+             case "systemExempted":
+-                return 8192; // ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
++                return 1024; // ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
+             default:
+                 throw new IllegalArgumentException("Unknown foreground service type: " + customServiceType);
+         }
+diff --git a/node_modules/@supersami/rn-foreground-service/android/src/main/java/com/supersami/foregroundservice/ForegroundServiceModule.java b/node_modules/@supersami/rn-foreground-service/android/src/main/java/com/supersami/foregroundservice/ForegroundServiceModule.java
+index d0a0648..71f511f 100644
+--- a/node_modules/@supersami/rn-foreground-service/android/src/main/java/com/supersami/foregroundservice/ForegroundServiceModule.java
++++ b/node_modules/@supersami/rn-foreground-service/android/src/main/java/com/supersami/foregroundservice/ForegroundServiceModule.java
+@@ -5,7 +5,6 @@ import android.content.Intent;
+ import android.app.NotificationManager;
+ import android.os.Build;
+ import android.util.Log;
+-
+ import com.facebook.react.bridge.Arguments;
+ import com.facebook.react.bridge.Promise;
+ import com.facebook.react.bridge.ReactApplicationContext;
+@@ -74,7 +73,12 @@ public class ForegroundServiceModule extends ReactContextBaseJavaModule {
+             intent.setAction(Constants.ACTION_FOREGROUND_SERVICE_START);
+             intent.putExtra(NOTIFICATION_CONFIG, Arguments.toBundle(notificationConfig));
+             ForegroundService.setReactContext(getReactApplicationContext());
+-            ComponentName componentName = getReactApplicationContext().startService(intent);
++            ComponentName componentName;
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                componentName = getReactApplicationContext().startForegroundService(intent);
++            } else {
++                componentName = getReactApplicationContext().startService(intent);
++            }
+ 
+             if (componentName != null) {
+                 promise.resolve(null);
+@@ -245,4 +249,16 @@ public class ForegroundServiceModule extends ReactContextBaseJavaModule {
+         promise.resolve(res);
+     }
+ 
++    @ReactMethod
++    public void addListener(String eventName) {
++        // Required for React Native 0.65+ NativeEventEmitter
++        // Keep: Required for RN built-in Event Emitter Calls.
++    }
++
++    @ReactMethod
++    public void removeListeners(Integer count) {
++        // Required for React Native 0.65+ NativeEventEmitter
++        // Keep: Required for RN built-in Event Emitter Calls.
++    }
++
+ }

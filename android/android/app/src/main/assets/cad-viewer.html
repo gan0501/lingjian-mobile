@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;touch-action:none}
+canvas{display:block}
+#status{display:none}
+#cad-container{width:100%;height:100%;position:absolute;top:0;left:0}
+/* Hide cad-simple-viewer's built-in command bar */
+.ml-cli-container {display:none!important}
+</style>
+</head><body>
+<div id="cad-container"></div>
+<div id="status"></div>
+
+<!-- CAD-Viewer bundle (cad-simple-viewer + three.js + libredwg-converter + data-model) -->
+<script src="cad-viewer-bundle.js"></script>
+
+<script>
+function post(obj){try{window.ReactNativeWebView.postMessage(JSON.stringify(obj));}catch(e){}}
+
+var _docManager=null;
+
+async function initViewer(){
+  try{
+
+    var CV=window.CadViewer;
+    if(!CV)throw new Error('CadViewer bundle not loaded');
+
+    _docManager=new CV.AcApDocManager({
+      container: document.getElementById('cad-container'),
+      autoResize: true,
+      baseUrl: './'
+    });
+
+
+    post({type:'engineReady'});
+  }catch(err){
+
+    post({type:'error',msg:'init: '+(err.message||err)});
+  }
+}
+
+document.addEventListener('message',handleMsg);
+window.addEventListener('message',handleMsg);
+function handleMsg(e){
+  try{
+    var data=typeof e.data==='string'?JSON.parse(e.data):e.data;
+    if(data&&data.type==='loadDwg'&&data.b64)openFile(data.b64,data.name||'drawing.dwg');
+  }catch(e2){}
+}
+
+async function openFile(b64,name){
+  try{
+
+    var bin=atob(b64);
+    var bytes=new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+
+
+    // IMPORTANT: Call _docManager.openDocument() NOT doc.openDocument()
+    // DocManager wraps it with onBeforeOpenDocument + onAfterOpenDocument (triggers rendering!)
+    var ok = await _docManager.openDocument(name, bytes);
+    if(ok===false){
+      throw new Error('文件解析失败');
+    }
+
+    document.getElementById('status').style.display='none';
+    post({type:'renderDone'});
+  }catch(err){
+
+    post({type:'error',msg:'open: '+(err.message||err)});
+  }
+}
+
+initViewer();
+</script>
+</body></html>

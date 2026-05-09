@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#FFFFFF"
+    android:padding="16dp">
+
+    <!-- 标题栏 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="水印设置"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        android:gravity="center"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Tab切换 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:orientation="horizontal"
+        android:background="#F5F5F5"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:id="@+id/tab_template"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="水印模板"
+            android:textSize="15sp"
+            android:textColor="#333333"
+            android:gravity="center"
+            android:background="?attr/selectableItemBackground" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center_vertical"
+            android:background="#DDDDDD" />
+
+        <TextView
+            android:id="@+id/tab_edit"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="编辑水印"
+            android:textSize="15sp"
+            android:textColor="#333333"
+            android:gravity="center"
+            android:background="?attr/selectableItemBackground" />
+    </LinearLayout>
+
+    <!-- 模板选择面板 -->
+    <FrameLayout
+        android:id="@+id/panel_template"
+        android:layout_width="match_parent"
+        android:layout_height="300dp"
+        android:visibility="visible">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recycler_templates"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <!-- 编辑面板 -->
+    <FrameLayout
+        android:id="@+id/panel_edit"
+        android:layout_width="match_parent"
+        android:layout_height="300dp"
+        android:visibility="gone">
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <LinearLayout
+                android:id="@+id/fields_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="8dp" />
+        </ScrollView>
+    </FrameLayout>
+
+    <!-- 底部按钮 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="16dp">
+
+        <Button
+            android:id="@+id/btn_cancel"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="取消"
+            android:textSize="15sp"
+            android:textColor="#666666"
+            android:background="?attr/selectableItemBackground"
+            style="?android:attr/borderlessButtonStyle" />
+
+        <Button
+            android:id="@+id/btn_confirm"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="确定"
+            android:textSize="15sp"
+            android:textColor="#2196F3"
+            android:background="?attr/selectableItemBackground"
+            style="?android:attr/borderlessButtonStyle" />
+    </LinearLayout>
+</LinearLayout>

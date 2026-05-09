@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{background:#ffffff;height:100%;width:100%;overflow:hidden;}
+#container{width:100%;height:100%;}
+#status{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  color:#00ff88;font-family:sans-serif;font-size:13px;
+  text-align:center;z-index:9999;pointer-events:none;
+  text-shadow:0 0 8px #00ff88;
+}
+</style>
+</head>
+<body>
+<div id="container"></div>
+<div id="status">初始化中...</div>
+<script src="file:///android_asset/three-all.js"></script>
+<script>
+// ── 全局状态 ───────────────────────────────────────────────────────��──
+var AGENTS = [];
+var scene, camera, renderer, clock;
+var robots = [];
+var models = { idle: null, walk: null, work: null };
+var loadedCount = 0;
+var particles = null;
+
+function setStatus(msg, color) {
+  var el = document.getElementById('status');
+  if (el) { el.textContent = msg; if (color) el.style.color = color; }
+}
+
+function getGLTFLoader() {
+  if (typeof THREE !== 'undefined' && THREE.GLTFLoader) {
+    return new THREE.GLTFLoader();
+  }
+  return null;
+}
+
+// ── 初始化场景 ───────────────────────────────────────────────────────
+function init() {
+  setStatus('构建场景...');
+  var container = document.getElementById('container');
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xffffff);
+  // scene.fog = new THREE.FogExp2(0xffffff, 0.0012); // 适度雾气，不遮挡文字（已禁用）
+
+  var aspect = window.innerWidth / window.innerHeight;
+  window.FRUSTUM_SIZE = 307; // 再拉近5%（原323）
+  // 地面下沉比例（0.38 = 蓝线位置）
+  window.GROUND_SHIFT = 0.38;
+  // 先创建相机，具体参数由 onResize 统一计算
+  camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 3000);
+
+  window.cameraControl = {
+    horizontalAngle: -45, // 默认45度斜角
+    verticalAngle: 15,
+    radius: 350,
+    target: new THREE.Vector3(0, -40, 0)
+  };
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace || 'srgb';
+  renderer.toneMapping = THREE.NoToneMapping;
+  // renderer.toneMappingExposure = 0.95;
+  container.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+  var dir = new THREE.DirectionalLight(0xffffff, 2.5);
+  dir.position.set(100, 200, 100);
+  dir.castShadow = true;
+  dir.shadow.mapSize.width = 1024;
+  dir.shadow.mapSize.height = 1024;
+  dir.shadow.camera.near = 0.5;
+  dir.shadow.camera.far = 600;
+  dir.shadow.camera.left = -200;
+  dir.shadow.camera.right = 200;
+  dir.shadow.camera.top = 200;
+  dir.shadow.camera.bottom = -200;
+  scene.add(dir);
+
+  var fill = new THREE.DirectionalLight(0x6688cc, 0.8);
+  fill.position.set(-150, 80, -100);
+  scene.add(fill);
+  var back = new THREE.DirectionalLight(0xffffff, 0.8);
+  back.position.set(0, 50, 200);
+  scene.add(back);
+
+  var redAmbient1 = new THREE.PointLight(0xB20000, 0.3, 500);
+  redAmbient1.position.set(180, 60, 0);
+  scene.add(redAmbient1);
+  var redAmbient2 = new THREE.PointLight(0xB20000, 0.15, 400);
+  redAmbient2.position.set(0, 20, -150);
+  scene.add(redAmbient2);
+
+  window.updateCameraPosition = function() {
+    var ctrl = window.cameraControl;
+    ctrl.verticalAngle = Math.max(15, Math.min(45, ctrl.verticalAngle)); // 最尕15°，避免低角度看到地板下方空白
+    var hRad = ctrl.horizontalAngle * Math.PI / 180;
+    var vRad = ctrl.verticalAngle * Math.PI / 180;
+    var horizontalDist = ctrl.radius * Math.cos(vRad);
+    var height = ctrl.radius * Math.sin(vRad);
+    var x = horizontalDist * Math.sin(hRad);
+    var z = horizontalDist * Math.cos(hRad);
+    var y = height + ctrl.target.y;
+    camera.position.set(x, y, z);
+    camera.lookAt(ctrl.target);
+  };
+  window.updateCameraPosition();
+
+  buildFloor();
+  buildWalls();
+  buildFloorConsoles();
+  // buildConsole(); // 隐藏独立操作台
+  buildPlatform();
+  buildParticles();
+
+  window.addEventListener('resize', onResize);
+  onResize(); // 初始化相机视野参数
+  setupCameraControls();
+}
+
+function setupCameraControls() {
+  var canvas = renderer ? renderer.domElement : null;
+  if (!canvas) return;
+  var isDragging = false;
+  var startX = 0, startY = 0, startHAngle = 0, startVAngle = 0;
+  canvas.style.touchAction = 'none';
+
+  // 默认视角（松手后回复）
+  var DEFAULT_H = -45, DEFAULT_V = 15;
+  // 自动回正状态
+  window.cameraResetState = {
+    active: false,
+    delayTimer: null,
+    startTime: 0,
+    duration: 1000,
+    fromH: 0, fromV: 15
+  };
+
+  function cancelReset() {
+    var rs = window.cameraResetState;
+    if (rs.delayTimer) { clearTimeout(rs.delayTimer); rs.delayTimer = null; }
+    rs.active = false;
+  }
+
+  function scheduleReset() {
+    var rs = window.cameraResetState;
+    cancelReset();
+    rs.delayTimer = setTimeout(function() {
+      rs.fromH = window.cameraControl.horizontalAngle;
+      rs.fromV = window.cameraControl.verticalAngle;
+      rs.startTime = performance.now();
+      rs.active = true;
+    }, 2000);
+  }
+
+  canvas.addEventListener('touchstart', function(e) {
+    if (e.touches.length === 1) {
+      isDragging = true; cancelReset();
+      startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+      startHAngle = window.cameraControl.horizontalAngle;
+      startVAngle = window.cameraControl.verticalAngle;
+      e.preventDefault();
+    }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    if (!isDragging || e.touches.length !== 1) return;
+    var deltaX = e.touches[0].clientX - startX;
+    var deltaY = e.touches[0].clientY - startY;
+    window.cameraControl.horizontalAngle = startHAngle - deltaX * 0.5;
+    window.cameraControl.verticalAngle = startVAngle + deltaY * 0.4;
+    window.updateCameraPosition();
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e) { isDragging = false; scheduleReset(); e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('touchcancel', function(e) { isDragging = false; scheduleReset(); e.preventDefault(); }, { passive: false });
+
+  canvas.addEventListener('mousedown', function(e) {
+    isDragging = true; cancelReset();
+    startX = e.clientX; startY = e.clientY;
+    startHAngle = window.cameraControl.horizontalAngle;
+    startVAngle = window.cameraControl.verticalAngle; e.preventDefault();
+  });
+  canvas.addEventListener('mousemove', function(e) {
+    if (!isDragging) return;
+    window.cameraControl.horizontalAngle = startHAngle - (e.clientX - startX) * 0.5;
+    window.cameraControl.verticalAngle = startVAngle + (e.clientY - startY) * 0.4;
+    window.updateCameraPosition(); e.preventDefault();
+  });
+  canvas.addEventListener('mouseup', function(e) { isDragging = false; scheduleReset(); e.preventDefault(); });
+  canvas.addEventListener('mouseleave', function(e) { isDragging = false; scheduleReset(); e.preventDefault(); });
+}
+
+function buildFloor() {
+  // 1200x1200 超大地板 - 边缘直接渐隐融入背景
+  var canvas = document.createElement('canvas');
+  canvas.width = 1024; canvas.height = 1024;
+  var ctx = canvas.getContext('2d');
+  
+  // 中心到四周的径向渐变：中心微灰，边缘渐隐到透明
+  var radGrad = ctx.createRadialGradient(512, 512, 0, 512, 512, 512);
+  radGrad.addColorStop(0, '#e4e7e6');     // 中心微灰（与APP背景#DCDEDD协调）
+  radGrad.addColorStop(0.25, '#dcdedd');  // 接近APP背景色
+  radGrad.addColorStop(0.5, '#dcdedd');   // 保持APP背景色
+  radGrad.addColorStop(0.75, 'rgba(220,222,221,0.5)'); // 开始渐隐
+  radGrad.addColorStop(0.9, 'rgba(220,222,221,0.15)'); // 接近透明
+  radGrad.addColorStop(1, 'rgba(220,222,221,0)');      // 完全透明
+  ctx.fillStyle = radGrad;
+  ctx.fillRect(0, 0, 1024, 1024);
+  
+  // 微妙的网格线（只在中心区域可见）
+  for(var i=0; i<=1024; i+=64){
+    var dist = Math.abs(i - 512) / 512; // 0=中心, 1=边缘
+    var alpha = Math.max(0, 0.05 * (1 - dist)); // 中心亮，边缘消失
+    ctx.strokeStyle = 'rgba(148,163,184,' + alpha + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 1024); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(1024, i); ctx.stroke();
+  }
+  
+  var tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  
+  // 使用圆形几何体，直径1200（半径600）
+  var floor = new THREE.Mesh(
+    new THREE.CircleGeometry(600, 64),
+    new THREE.MeshStandardMaterial({
+      map: tex, 
+      roughness: 0.85, 
+      metalness: 0.05,
+      transparent: true,
+      alphaTest: 0.01
+    })
+  );
+  floor.rotation.x = -Math.PI/2;
+  floor.position.y = -40;
+  floor.receiveShadow = true;
+  scene.add(floor);
+}
+
+function buildWalls() {
+  // 悬浮品牌文字 - 醒目红色
+  makeRightWallCanvas(function(rwCanvas){
+    var decal = new THREE.Mesh(
+      new THREE.PlaneGeometry(340, 160),
+      new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(rwCanvas), transparent:true, opacity:0.9})
+    );
+    // 文字升高，填充顶部空间
+    decal.position.set(177, 90, 10); decal.rotation.y = -Math.PI/2; scene.add(decal);
+  });
+}
+
+// 落地操作台面：1排4个，每台面供2个机器人
+function buildFloorConsoles(){
+  window.consolePositions = [];
+  for(var i=0;i<4;i++){
+    var x = -135 + i * 90;
+    var z = -130;
+    var g = new THREE.Group();
+
+    var base = new THREE.Mesh(
+      new THREE.BoxGeometry(80,28,50),
+      new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.3,metalness:0.15})
+    );
+    base.position.set(0,14,0); base.castShadow=true; base.receiveShadow=true; g.add(base);
+
+    var top = new THREE.Mesh(
+      new THREE.BoxGeometry(84,3,54),
+      new THREE.MeshStandardMaterial({color:0xf1f5f9,roughness:0.2,metalness:0.25})
+    );
+    top.position.set(0,29,0); top.castShadow=true; g.add(top);
+
+    var screenCanvas = makeConsoleScreen(i+1);
+    var screenTex = new THREE.CanvasTexture(screenCanvas);
+    var screenMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(72,42),
+      new THREE.MeshBasicMaterial({map:screenTex})
+    );
+    screenMesh.position.set(0,33,-3);
+    screenMesh.rotation.x = -Math.PI/5;
+    g.add(screenMesh);
+
+    var redLine = new THREE.Mesh(new THREE.BoxGeometry(84,1.5,1.5),new THREE.MeshBasicMaterial({color:0xB20000}));
+    redLine.position.set(0,30.5,27); g.add(redLine);
+
+    var sideL = new THREE.Mesh(new THREE.BoxGeometry(1,20,1),new THREE.MeshBasicMaterial({color:0xB20000,transparent:true,opacity:0.4}));
+    sideL.position.set(-40,14,25); g.add(sideL);
+    var sideR = sideL.clone(); sideR.position.set(40,14,25); g.add(sideR);
+
+    g.position.set(x,-40,z);
+    scene.add(g);
+    window.consolePositions[i] = {x:x, z:z};
+  }
+}
+
+// 深色高对比度屏幕 - 2x分辨率确保清晰
+function makeConsoleScreen(id){
+  var c = document.createElement('canvas'); c.width=1280; c.height=800;
+  var ctx = c.getContext('2d');
+  ctx.fillStyle='#0a0f1e'; ctx.fillRect(0,0,1280,800);
+  ctx.strokeStyle='rgba(178,0,0,0.12)'; ctx.lineWidth=3;
+  for(var gx=0;gx<=1280;gx+=80){ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,800);ctx.stroke();}
+  for(var gy=0;gy<=800;gy+=80){ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(1280,gy);ctx.stroke();}
+  ctx.strokeStyle='#B20000'; ctx.lineWidth=8; ctx.strokeRect(12,12,1256,776);
+  ctx.strokeStyle='rgba(220,38,38,0.3)'; ctx.lineWidth=4; ctx.strokeRect(24,24,1232,752);
+  ctx.font='bold 72px sans-serif'; ctx.fillStyle='#ef4444'; ctx.textAlign='center';
+  ctx.fillText('CONSOLE '+id,640,120);
+  ctx.font='56px sans-serif'; ctx.fillStyle='#22c55e';
+  ctx.fillText('STANDBY',640,220);
+  ctx.strokeStyle='rgba(178,0,0,0.4)'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.moveTo(80,280); ctx.lineTo(1200,280); ctx.stroke();
+  ctx.font='48px sans-serif'; ctx.fillStyle='#94a3b8'; ctx.textAlign='left';
+  ctx.fillText('Agents: 2',80,380);
+  ctx.fillText('Tasks: 0',80,460);
+  ctx.fillText('Status: Ready',80,540);
+  ctx.strokeStyle='#B20000'; ctx.lineWidth=6; ctx.beginPath();
+  for(var wi=0;wi<1040;wi++){ctx.lineTo(120+wi,680+Math.sin(wi*0.04)*60);}
+  ctx.stroke();
+  return c;
+}
+
+function makeRightWallCanvas(callback){
+  var c=document.createElement('canvas'); c.width=2048; c.height=2048;
+  var ctx=c.getContext('2d');
+  ctx.clearRect(0,0,2048,2048);
+
+  // 添加CCCCCC背板
+  ctx.fillStyle='#CCCCCC';
+  ctx.fillRect(0,0,2048,2048);
+
+  ctx.font='900 104px sans-serif'; ctx.fillStyle='#B20000'; ctx.textAlign='center';
+  ctx.fillText('NIUMATI STUDIO',1024,168);
+  ctx.fillStyle='#B20000'; ctx.fillRect(160,240,1728,8);
+
+  // 加载真实logo图片
+  var logoImg=new Image();
+  logoImg.onload=function(){
+    // 绘制logo（在标语上方）
+    var logoSize=192; // logo尺寸（增加20%：160 * 1.2 = 192）
+    var logoX=1024-logoSize/2;
+    var logoY=440;
+
+    ctx.drawImage(logoImg,logoX,logoY,logoSize,logoSize);
+
+    // 调整标语位置（向下移动logo高度的距离）
+    ctx.font='bold 112px sans-serif'; ctx.fillStyle='#B20000'; ctx.textAlign='center';
+    ctx.fillText('遵纪守法 忠诚可靠   爱岗敬业 精准执行',1024,912);
+    ctx.font='64px sans-serif'; ctx.fillStyle='#000000';
+    ctx.fillText('LOYAL & RELIABLE  ·  PRECISION EXECUTION',1024,1112);
+    ctx.fillStyle='#B20000'; ctx.fillRect(160,1760,1728,8);
+    ctx.font='bold 72px sans-serif'; ctx.fillStyle='rgba(178,0,0,0.5)';
+    ctx.fillText('LINKBUILD',1024,1900);
+
+    if(callback) callback(c);
+  };
+  logoImg.onerror=function(){
+    // 如果加载失败，使用简化logo
+    var logoY=520;
+    ctx.save();
+    ctx.translate(1024,logoY);
+    ctx.beginPath();
+    ctx.arc(0,0,80,0,Math.PI*2);
+    ctx.fillStyle='#B20000';
+    ctx.fill();
+    ctx.font='bold 100px sans-serif';
+    ctx.fillStyle='#FFFFFF';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('L',0,0);
+    ctx.restore();
+
+    ctx.font='bold 112px sans-serif'; ctx.fillStyle='#B20000'; ctx.textAlign='center';
+    ctx.fillText('遵纪守法 忠诚可靠   爱岗敬业 精准执行',1024,912);
+    ctx.font='64px sans-serif'; ctx.fillStyle='#000000';
+    ctx.fillText('LOYAL & RELIABLE  ·  PRECISION EXECUTION',1024,1112);
+    ctx.fillStyle='#B20000'; ctx.fillRect(160,1760,1728,8);
+    ctx.font='bold 72px sans-serif'; ctx.fillStyle='rgba(178,0,0,0.5)';
+    ctx.fillText('LINKBUILD',1024,1900);
+
+    if(callback) callback(c);
+  };
+  logoImg.src='file:///android_asset/logo.png';
+}
+
+function buildConsole(){
+  var g=new THREE.Group();
+
+  var panel=new THREE.Mesh(new THREE.BoxGeometry(85,48,3),new THREE.MeshStandardMaterial({color:0xf1f5f9,roughness:0.2,metalness:0.3,transparent:true,opacity:0.95}));
+  panel.position.set(0,24,29.5); g.add(panel);
+
+  var top=new THREE.Mesh(new THREE.BoxGeometry(85,5,55),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.3,metalness:0.2}));
+  top.position.set(0,42,0); top.castShadow=true; g.add(top);
+  var redLine=new THREE.Mesh(new THREE.BoxGeometry(85,1.5,1.5),new THREE.MeshBasicMaterial({color:0xB20000}));
+  redLine.position.set(0,45,27); g.add(redLine);
+
+  var screenCanvas=document.createElement('canvas'); screenCanvas.width=1024; screenCanvas.height=512;
+  var sCtx=screenCanvas.getContext('2d');
+  sCtx.fillStyle='#f8fafc'; sCtx.fillRect(0,0,1024,512);
+  sCtx.strokeStyle='rgba(148,163,184,0.2)'; sCtx.lineWidth=4;
+  for(var i=0;i<=1024;i+=128){sCtx.beginPath();sCtx.moveTo(i,0);sCtx.lineTo(i,512);sCtx.stroke();}
+  for(var i=0;i<=512;i+=64){sCtx.beginPath();sCtx.moveTo(0,i);sCtx.lineTo(1024,i);sCtx.stroke();}
+  sCtx.strokeStyle='rgba(178,0,0,0.3)'; sCtx.lineWidth=8; sCtx.strokeRect(8,8,1008,496);
+  sCtx.font='44px sans-serif'; sCtx.fillStyle='#475569'; sCtx.textAlign='left';
+  sCtx.fillText('SYS: ONLINE',40,88);
+  sCtx.fillText('AGENTS: 10/10',40,168);
+  sCtx.fillText('STATUS: ACTIVE',40,248);
+  sCtx.strokeStyle='#B20000'; sCtx.lineWidth=6; sCtx.beginPath();
+  for(var i=0;i<720;i++){sCtx.lineTo(120+i,360+Math.sin(i*0.05)*48);}
+  sCtx.stroke();
+  var screenTex=new THREE.CanvasTexture(screenCanvas);
+  var screenMesh=new THREE.Mesh(new THREE.PlaneGeometry(70,35),new THREE.MeshBasicMaterial({map:screenTex,transparent:true}));
+  screenMesh.rotation.x=-Math.PI/2; screenMesh.position.set(0,44.6,0); g.add(screenMesh);
+
+  var scanCanvas=document.createElement('canvas'); scanCanvas.width=256; scanCanvas.height=128;
+  var scanTex=new THREE.CanvasTexture(scanCanvas);
+  var scanMesh=new THREE.Mesh(new THREE.PlaneGeometry(70,35),new THREE.MeshBasicMaterial({map:scanTex,transparent:true,opacity:0.5,blending:THREE.AdditiveBlending}));
+  scanMesh.rotation.x=-Math.PI/2; scanMesh.position.set(0,44.7,0); g.add(scanMesh);
+  g.userData.screenTex=screenTex; g.userData.scanTex=scanTex; g.userData.scanCanvas=scanCanvas;
+
+  var fpC=document.createElement('canvas'); fpC.width=2048; fpC.height=1024;
+  var ctx=fpC.getContext('2d');
+  ctx.clearRect(0,0,2048,1024);
+  ctx.font='bold 352px sans-serif'; ctx.fillStyle='#000000';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('领建AI',1024,512);
+  var textTex=new THREE.CanvasTexture(fpC);
+  var textMesh=new THREE.Mesh(new THREE.PlaneGeometry(55,27.5),new THREE.MeshBasicMaterial({map:textTex,transparent:true}));
+  textMesh.position.set(0,24,32); g.add(textMesh);
+  g.position.set(-120,-40,130);
+  scene.add(g);
+}
+
+function buildPlatform(){
+  var plat=new THREE.Mesh(new THREE.BoxGeometry(90,8,220),new THREE.MeshStandardMaterial({color:0xf1f5f9,roughness:0.9}));
+  plat.position.set(122,-36,50); plat.castShadow=true; plat.receiveShadow=true; scene.add(plat);
+  var border=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(90,8,220)),new THREE.LineBasicMaterial({color:0xcbd5e1,linewidth:1}));
+  border.position.copy(plat.position); scene.add(border);
+
+  var platRedLine=new THREE.Mesh(new THREE.BoxGeometry(90,1,1),new THREE.MeshBasicMaterial({color:0xB20000,transparent:true,opacity:0.5}));
+  platRedLine.position.set(122,-31,160); scene.add(platRedLine);
+
+  var R=11;
+  for(var i=0;i<10;i++){
+    var row=i%5; var col=Math.floor(i/5);
+    var x=97+col*50; var z=-30+row*40;
+    var base=new THREE.Mesh(new THREE.CylinderGeometry(R,R,3,32),new THREE.MeshStandardMaterial({color:0xe2e8f0,roughness:0.8}));
+    base.position.set(x,-30,z); base.castShadow=true; scene.add(base);
+
+    var glowCanvas=document.createElement('canvas'); glowCanvas.width=128; glowCanvas.height=128;
+    var gctx=glowCanvas.getContext('2d');
+    gctx.clearRect(0,0,128,128);
+    var radGrad=gctx.createRadialGradient(64,64,38,64,64,56);
+    radGrad.addColorStop(0,'rgba(178,0,0,0)');
+    radGrad.addColorStop(0.5,'rgba(178,0,0,0.3)');
+    radGrad.addColorStop(1,'rgba(178,0,0,0)');
+    gctx.fillStyle=radGrad; gctx.fillRect(0,0,128,128);
+    gctx.strokeStyle='rgba(178,0,0,0.5)'; gctx.lineWidth=2;
+    gctx.beginPath(); gctx.arc(64,64,46,0,Math.PI*2); gctx.stroke();
+    var glowTex=new THREE.CanvasTexture(glowCanvas);
+    var glow=new THREE.Mesh(new THREE.PlaneGeometry(R*2.3,R*2.3),new THREE.MeshBasicMaterial({map:glowTex,transparent:true,opacity:0.7}));
+    glow.rotation.x=-Math.PI/2; glow.position.set(x,-27.5,z); scene.add(glow);
+    robots.push({basePos:{x:x,y:-28,z:z},model:null,mixer:null,agentIdx:i});
+  }
+}
+
+function buildParticles(){
+  var count=60;
+  var positions=new Float32Array(count*3);
+  for(var i=0;i<count;i++){
+    positions[i*3]=(Math.random()-0.5)*400;
+    positions[i*3+1]=Math.random()*150-30;
+    positions[i*3+2]=(Math.random()-0.5)*400;
+  }
+  var geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
+  var pCanvas=document.createElement('canvas'); pCanvas.width=32; pCanvas.height=32;
+  var pctx=pCanvas.getContext('2d');
+  var pGrad=pctx.createRadialGradient(16,16,0,16,16,16);
+  pGrad.addColorStop(0,'rgba(178,0,0,0.4)');
+  pGrad.addColorStop(0.4,'rgba(178,0,0,0.15)');
+  pGrad.addColorStop(1,'rgba(178,0,0,0)');
+  pctx.fillStyle=pGrad; pctx.fillRect(0,0,32,32);
+  var pTex=new THREE.CanvasTexture(pCanvas);
+  var mat=new THREE.PointsMaterial({map:pTex,size:4,transparent:true,opacity:0.35,blending:THREE.AdditiveBlending,depthWrite:false});
+  particles=new THREE.Points(geo,mat);
+  scene.add(particles);
+}
+
+// ── XHR 加载 GLB ────────────────────────────────────────────────────
+function loadGLBWithXHR(name, slot, loader, onDone) {
+  var url = 'file:///android_asset/' + name + '.glb';
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', url, true);
+  xhr.responseType = 'arraybuffer';
+  xhr.onload = function() {
+    if (xhr.status === 200 || xhr.status === 0) {
+      try {
+        loader.parse(xhr.response, 'file:///android_asset/', function(gltf) {
+          onDone(true, slot, gltf);
+        }, function(e) {
+          onDone(false, slot, null, name + ' parse:' + (e && e.message ? e.message : e));
+        });
+      } catch(e2) {
+        onDone(false, slot, null, name + ' parseEx:' + e2.message);
+      }
+    } else {
+      onDone(false, slot, null, name + ' status=' + xhr.status);
+    }
+  };
+  xhr.onerror = function() { onDone(false, slot, null, name + ' XHR_ERR'); };
+  xhr.send();
+}
+
+function loadModels(){
+  var loader = getGLTFLoader();
+  if(!loader){ setStatus('GLTFLoader未找到','#ff4444'); createFallbackRobots(); return; }
+  var total=3, done=0, errors=[];
+  setStatus('加载模型...','#00ff88');
+  function onDone(ok,slot,gltf,errMsg){
+    done++;
+    if(ok){models[slot]=gltf; setStatus('加载 '+done+'/'+total,'#00ff88');}
+    else{errors.push(errMsg||slot); setStatus('失败:\n'+errors.join('\n'),'#ff4444');}
+    if(done>=total){
+      setTimeout(function(){document.getElementById('status').style.display='none';},errors.length>0?4000:0);
+      createRobots(); notifyReady();
+    }
+  }
+  loadGLBWithXHR('zhanli','idle',loader,onDone);
+  loadGLBWithXHR('walk','walk',loader,onDone);
+  loadGLBWithXHR('caozuo','work',loader,onDone);
+}
+
+function createRobots(){
+  if(!models.idle){createFallbackRobots();return;}
+  robots.forEach(function(robot,i){
+    try{
+      var clone=THREE.SkeletonClone?THREE.SkeletonClone(models.idle.scene):models.idle.scene.clone(true);
+      clone.traverse(function(child){if(child.isMesh||child.isSkinnedMesh){child.castShadow=true;child.receiveShadow=true;if(child.material&&child.material.color){child.material.color.multiplyScalar(1.1);}}});
+      clone.scale.set(40,40,40);
+      clone.position.set(robot.basePos.x,-28,robot.basePos.z);
+      clone.rotation.y=-Math.PI/2;
+      scene.add(clone);
+      robot.model=clone;
+      robot.mixer=new THREE.AnimationMixer(clone);
+      robot.clips={};
+      if(models.idle.animations&&models.idle.animations.length>0) robot.clips.idle=models.idle.animations[0];
+      if(models.walk&&models.walk.animations&&models.walk.animations.length>0) robot.clips.walk=models.walk.animations[0];
+      if(models.work&&models.work.animations&&models.work.animations.length>0) robot.clips.work=models.work.animations[0];
+      if(robot.clips.idle){robot.currentAction=robot.mixer.clipAction(robot.clips.idle);robot.currentAction.play();}
+      robot.currentState='idle'; robot.targetState='idle';
+      robot.walkProgress=0; robot.walkStartPos=null; robot.walkEndPos=null;
+
+      // 前8个机器人分配到4个台面（每台面2人）
+      // 注意：操作台在地面(y=-40)，机器人走到操作台时需要站在地面上(y=-28相对地面)
+      if(i<8){
+        var consoleIdx=Math.floor(i/2);
+        var side=i%2;
+        var cx=-135+consoleIdx*90;
+        var cz=-130;
+        var offsetX=side===0?-15:15;
+        // 操作台位置在地面，机器人站在地面上（y=-28是地面上的站立高度）
+        robot.screenPos={x:cx+offsetX,y:-28,z:cz+50};
+        // 标记工作位置在地面，需要调整高度
+        robot.workAtGround=true;
+      }
+    }catch(e){console.warn('robot '+i+' err:',e.message);createFallbackRobotAt(robot);}
+  });
+}
+
+function createFallbackRobots(){robots.forEach(function(robot){createFallbackRobotAt(robot);});}
+function createFallbackRobotAt(robot){
+  var g=new THREE.Group();
+  var body=new THREE.Mesh(new THREE.CylinderGeometry(5,5,22,16),new THREE.MeshStandardMaterial({color:0xcccccc,metalness:0.4,roughness:0.6}));
+  body.position.y=11;body.castShadow=true;g.add(body);
+  var head=new THREE.Mesh(new THREE.SphereGeometry(6,16,16),new THREE.MeshStandardMaterial({color:0xdddddd,metalness:0.5,roughness:0.4}));
+  head.position.y=30;head.castShadow=true;g.add(head);
+  var eye=new THREE.Mesh(new THREE.SphereGeometry(1.5,8,8),new THREE.MeshBasicMaterial({color:0xB20000}));
+  eye.position.set(3,31,5);g.add(eye.clone());eye.position.set(-3,31,5);g.add(eye);
+  g.position.set(robot.basePos.x,robot.basePos.y,robot.basePos.z);
+  g.rotation.y=Math.PI*0.75;scene.add(g);robot.model=g;
+}
+
+function switchRobotAnimation(robot,animName){
+  if(!robot.mixer||!robot.clips[animName])return;
+  var newAction=robot.mixer.clipAction(robot.clips[animName]);
+  if(robot.currentAction) robot.currentAction.fadeOut(0.4);
+  newAction.reset();newAction.fadeIn(0.4);newAction.play();
+  robot.currentAction=newAction;
+}
+
+function setRobotState(robotIdx,newState){
+  var robot=robots[robotIdx];
+  if(!robot||!robot.model)return;
+  if(robot.targetState===newState)return;
+  robot.targetState=newState;
+  if(newState==='working'){
+    if(robot.screenPos){
+      // 从平台位置出发（y=-28是平台上的高度）
+      robot.walkStartPos={x:robot.basePos.x,y:-28,z:robot.basePos.z};
+      // 走到操作台位置（操作台在地面y=-40）
+      // 机器人需要从平台(y=-28)下降到地面高度(y=-40+12=-28? 不对)
+      // 实际上：平台顶部约y=-32，机器人脚底在y=-32，模型中心在y=-28
+      // 地面是y=-40，机器人脚底应该在y=-40，模型中心应该在y=-40+4=-36
+      // 但为了简化，我们让机器人走到操作台时站在地面上，高度调整为y=-36
+      robot.walkEndPos={x:robot.screenPos.x,y:-36,z:robot.screenPos.z};
+      robot.walkProgress=0;robot.currentState='walking';
+      switchRobotAnimation(robot,'walk');robot.model.rotation.y=Math.PI;
+    }else{robot.currentState='working';switchRobotAnimation(robot,'work');}
+    updateScreenColor(robotIdx,true);
+  }else{
+    if(robot.currentState==='working'&&robot.screenPos){
+      // 从操作台返回平台
+      robot.walkStartPos={x:robot.model.position.x,y:robot.model.position.y,z:robot.model.position.z};
+      // 返回平台位置（y=-28）
+      robot.walkEndPos={x:robot.basePos.x,y:-28,z:robot.basePos.z};
+      robot.walkProgress=0;robot.currentState='returning';
+      switchRobotAnimation(robot,'walk');robot.model.rotation.y=-Math.PI/2;
+    }else{robot.currentState='idle';switchRobotAnimation(robot,'idle');robot.model.rotation.y=Math.PI;}
+    updateScreenColor(robotIdx,false);
+  }
+}
+
+// ── 更新屏幕颜色 ──────────────────────────────────────────────────
+var activeScreens={};
+function updateScreenColor(robotIdx,active){
+  if(robotIdx>=8)return;
+  if(active){activeScreens[robotIdx]=true;}else{delete activeScreens[robotIdx];}
+  var consoleIdx=Math.floor(robotIdx/2);
+  var consoleX=-135+consoleIdx*90;
+  var consoleZ=-130;
+
+  scene.traverse(function(obj){
+    if(obj.isMesh&&obj.geometry&&obj.geometry.type==='PlaneGeometry'){
+      if(obj.geometry.parameters.width===72&&obj.geometry.parameters.height===42){
+        var parent=obj.parent;
+        if(parent){
+          var px=Math.round(parent.position.x);
+          var pz=Math.round(parent.position.z);
+          if(px===consoleX&&pz===consoleZ){
+            var pairA=consoleIdx*2;
+            var pairB=consoleIdx*2+1;
+            var anyActive=activeScreens[pairA]||activeScreens[pairB];
+            if(anyActive){
+              var c=document.createElement('canvas');c.width=320;c.height=200;
+              var ctx=c.getContext('2d');
+              ctx.fillStyle='#0f172a';ctx.fillRect(0,0,320,200);
+              ctx.strokeStyle='rgba(220,38,38,0.15)';ctx.lineWidth=1;
+              for(var gx=0;gx<=320;gx+=20){ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,200);ctx.stroke();}
+              for(var gy=0;gy<=200;gy+=20){ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(320,gy);ctx.stroke();}
+              ctx.strokeStyle='#ef4444';ctx.lineWidth=3;ctx.strokeRect(3,3,314,194);
+              ctx.strokeStyle='rgba(239,68,68,0.3)';ctx.lineWidth=1;ctx.strokeRect(7,7,306,186);
+              ctx.font='bold 18px sans-serif';ctx.fillStyle='#ef4444';ctx.textAlign='center';
+              ctx.fillText('CONSOLE '+(consoleIdx+1)+' ■ ACTIVE',160,30);
+              ctx.font='bold 16px sans-serif';ctx.fillStyle='#22c55e';
+              ctx.fillText('WORKING',160,58);
+              ctx.strokeStyle='rgba(239,68,68,0.5)';ctx.lineWidth=1;
+              ctx.beginPath();ctx.moveTo(20,72);ctx.lineTo(300,72);ctx.stroke();
+              ctx.font='13px sans-serif';ctx.fillStyle='#cbd5e1';ctx.textAlign='left';
+              var info1=activeScreens[pairA]?'Agent '+(pairA+1)+': BUSY':'Agent '+(pairA+1)+': IDLE';
+              var info2=activeScreens[pairB]?'Agent '+(pairB+1)+': BUSY':'Agent '+(pairB+1)+': IDLE';
+              ctx.fillText(info1,20,100);ctx.fillText(info2,20,125);
+              ctx.fillText('Processing...',20,155);
+              ctx.strokeStyle='#ef4444';ctx.lineWidth=2;ctx.beginPath();
+              for(var wi=0;wi<260;wi++){ctx.lineTo(30+wi,180+Math.sin(wi*0.12+Date.now()*0.001)*10);}
+              ctx.stroke();
+              var tex=new THREE.CanvasTexture(c);
+              obj.material=new THREE.MeshBasicMaterial({map:tex});
+              obj.userData.activeCanvas=c;obj.userData.activeTex=tex;
+            }else{
+              var c=makeConsoleScreen(consoleIdx+1);
+              var tex=new THREE.CanvasTexture(c);
+              obj.material=new THREE.MeshBasicMaterial({map:tex});
+              obj.userData.activeCanvas=null;obj.userData.activeTex=null;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function updateActiveScreens(delta){}
+
+var WALK_SPEED=0.3;
+function updateWalking(delta){
+  robots.forEach(function(robot){
+    if(!robot.model)return;
+    if(robot.currentState==='walking'||robot.currentState==='returning'){
+      robot.walkProgress+=delta*WALK_SPEED;
+      if(robot.walkProgress>=1){
+        robot.model.position.x=robot.walkEndPos.x;
+        robot.model.position.z=robot.walkEndPos.z;
+        // 到达目的地时，设置正确的Y高度
+        robot.model.position.y=robot.walkEndPos.y;
+        if(robot.currentState==='walking'){
+          robot.currentState='working';switchRobotAnimation(robot,'work');robot.model.rotation.y=Math.PI;
+        }else{
+          robot.currentState='idle';switchRobotAnimation(robot,'idle');robot.model.rotation.y=-Math.PI/2;
+        }
+      }else{
+        var t=robot.walkProgress;
+        var ease=t<0.5?2*t*t:-1+(4-2*t)*t;
+        robot.model.position.x=robot.walkStartPos.x+(robot.walkEndPos.x-robot.walkStartPos.x)*ease;
+        robot.model.position.z=robot.walkStartPos.z+(robot.walkEndPos.z-robot.walkStartPos.z)*ease;
+        // Y轴高度变化：从平台(y=-28)走到地面操作台(y=-36)时下降
+        robot.model.position.y=robot.walkStartPos.y+(robot.walkEndPos.y-robot.walkStartPos.y)*ease;
+      }
+    }
+  });
+}
+
+function addNameLabel(robot,agent,isWorking){
+  var canvas=document.createElement('canvas');canvas.width=160;canvas.height=40;
+  var ctx=canvas.getContext('2d');
+  ctx.font=isWorking?'bold 36px sans-serif':'bold 18px sans-serif';
+  ctx.fillStyle=agent.status==='working'?'#00ff88':'#ff6b6b';
+  ctx.textAlign='center';ctx.fillText(agent.name,80,28);
+  var spriteMat=new THREE.SpriteMaterial({map:new THREE.CanvasTexture(canvas),transparent:true});
+  var sprite=new THREE.Sprite(spriteMat);
+  sprite.scale.set(0.8,0.22,1);sprite.position.y=1.85;
+  sprite.material.depthTest=false;sprite.renderOrder=999;
+  robot.model.add(sprite);robot.labelSprite=sprite;
+}
+
+function listenMessages(){
+  function parse(e){try{var m=JSON.parse(e.data);if(m.type==='UPDATE_AGENTS'){AGENTS=m.agents;syncAgentStates();}}catch(x){}}
+  window.addEventListener('message',parse);
+  document.addEventListener('message',parse);
+}
+
+window.buildCharacters=function(){if(robots.length>0)syncAgentStates();};
+
+function syncAgentStates(){
+  robots.forEach(function(robot,i){
+    if(!robot.model||!AGENTS[i])return;
+    var agentStatus=AGENTS[i].status;
+    if(agentStatus==='working'){
+      if(robot.labelSprite){robot.model.remove(robot.labelSprite);robot.labelSprite=null;}
+      addNameLabel(robot,AGENTS[i],true);setRobotState(i,'working');
+    }else{
+      if(robot.labelSprite){robot.model.remove(robot.labelSprite);robot.labelSprite=null;}
+      setRobotState(i,'idle');
+    }
+  });
+}
+
+function notifyReady(){
+  if(window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({type:'SCENE_READY'}));
+}
+
+function onResize(){
+  var w=window.innerWidth,h=window.innerHeight;
+  var f=window.FRUSTUM_SIZE||380;
+  var shift=window.GROUND_SHIFT||0.55;
+  var targetAspect=16/9,currentAspect=w/h;
+  var halfW,halfH;
+  if(currentAspect>targetAspect){
+    halfW=f*targetAspect/2;
+    halfH=f/2;
+  }else{
+    halfW=f*targetAspect/2;
+    halfH=f*targetAspect/currentAspect/2;
+  }
+  // 按比例偏移：shift=0.55 表示把地面推到视口底部约75%位置
+  var vo=halfH*2*shift;
+  camera.left=-halfW;camera.right=halfW;
+  camera.top=halfH+vo;camera.bottom=-halfH+vo;
+  camera.updateProjectionMatrix();renderer.setSize(w,h);
+  if(window.updateCameraPosition) window.updateCameraPosition();
+}
+
+// ── 气泡话语系统 ──────────────────────────────────────────────────
+var BUBBLE_MSGS={
+  '指尖标书':['让我想想如何来完善','还需要加入行业数据'],
+  '桩基比选':['让我深入分析这些数据','我需要结合行业知识'],
+  '项目助手':['让我全面获取所有项目','我需要结合用户偏好']
+};
+var BUBBLE_INTERVAL=5,BUBBLE_FADE_IN=0.4,BUBBLE_SHOW=3.5,BUBBLE_FADE_OUT=0.6;
+
+function createBubbleSprite(text){
+  var c=document.createElement('canvas');c.width=512;c.height=96;
+  var ctx=c.getContext('2d');
+  ctx.fillStyle='rgba(255,245,245,0.95)';ctx.strokeStyle='rgba(178,0,0,0.4)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(20,6);ctx.lineTo(492,6);ctx.quadraticCurveTo(506,6,506,20);
+  ctx.lineTo(506,60);ctx.quadraticCurveTo(506,74,492,74);ctx.lineTo(268,74);ctx.lineTo(256,90);
+  ctx.lineTo(244,74);ctx.lineTo(20,74);ctx.quadraticCurveTo(6,74,6,60);ctx.lineTo(6,20);
+  ctx.quadraticCurveTo(6,6,20,6);ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.font='32px sans-serif';ctx.fillStyle='#B20000';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.shadowColor='rgba(178,0,0,0.3)';ctx.shadowBlur=4;ctx.fillText(text,256,40);ctx.shadowBlur=0;
+  var tex=new THREE.CanvasTexture(c);
+  var mat=new THREE.SpriteMaterial({map:tex,transparent:true,opacity:0,depthTest:false});
+  var sprite=new THREE.Sprite(mat);sprite.scale.set(2.4,0.45,1);sprite.position.y=2.2;sprite.renderOrder=1000;
+  return sprite;
+}
+
+function updateBubbles(delta){
+  robots.forEach(function(robot,idx){
+    if(!robot.model)return;
+    var agent=AGENTS[idx];if(!agent)return;
+    var msgs=BUBBLE_MSGS[agent.name];
+    var isWorking=agent.status==='working'&&robot.currentState==='working';
+    if(isWorking&&msgs&&msgs.length>0){
+      if(!robot.bubble){robot.bubble={msgIdx:0,timer:0,phase:'idle',sprite:null};}
+      var b=robot.bubble;b.timer+=delta;
+      if(b.phase==='idle'){
+        if(b.timer>=BUBBLE_INTERVAL){if(b.sprite){robot.model.remove(b.sprite);}
+          b.sprite=createBubbleSprite(msgs[b.msgIdx]);robot.model.add(b.sprite);b.phase='fadeIn';b.timer=0;}
+      }else if(b.phase==='fadeIn'){
+        var p=Math.min(b.timer/BUBBLE_FADE_IN,1);if(b.sprite)b.sprite.material.opacity=p;
+        if(p>=1){b.phase='show';b.timer=0;}
+      }else if(b.phase==='show'){if(b.timer>=BUBBLE_SHOW){b.phase='fadeOut';b.timer=0;}
+      }else if(b.phase==='fadeOut'){
+        var p=Math.min(b.timer/BUBBLE_FADE_OUT,1);if(b.sprite)b.sprite.material.opacity=1-p;
+        if(p>=1){if(b.sprite){robot.model.remove(b.sprite);b.sprite=null;}
+          b.msgIdx=(b.msgIdx+1)%msgs.length;b.phase='idle';b.timer=0;}
+      }
+    }else{
+      if(robot.bubble&&robot.bubble.sprite){robot.model.remove(robot.bubble.sprite);robot.bubble.sprite=null;}
+      robot.bubble=null;
+    }
+  });
+}
+
+// ── 动画循环 ──────────────────────────────────────────────────────────
+var scanLineY=0,particleTime=0;
+function animate(){
+  requestAnimationFrame(animate);
+  var delta=clock.getDelta();
+  robots.forEach(function(r){if(r.mixer)r.mixer.update(delta);});
+  updateWalking(delta);updateActiveScreens(delta);updateBubbles(delta);
+
+  // 自动回正动画（小米汽车风格：松手2秒后平滑回正）
+  var rs=window.cameraResetState;
+  if(rs&&rs.active){
+    var elapsed=performance.now()-rs.startTime;
+    var t=Math.min(elapsed/rs.duration,1);
+    // easeInOutCubic 缓动
+    var ease=t<0.5?4*t*t*t:(t-1)*(2*t-2)*(2*t-2)+1;
+    window.cameraControl.horizontalAngle=rs.fromH+(-45-rs.fromH)*ease;
+    window.cameraControl.verticalAngle=rs.fromV+(15-rs.fromV)*ease;
+    window.updateCameraPosition();
+    if(t>=1) rs.active=false;
+  }
+
+  scanLineY+=delta*60;if(scanLineY>128)scanLineY=0;
+  scene.traverse(function(obj){
+    if(obj.userData&&obj.userData.scanCanvas){
+      var c=obj.userData.scanCanvas;var ctx=c.getContext('2d');
+      ctx.clearRect(0,0,256,128);
+      var grad=ctx.createLinearGradient(0,scanLineY-20,0,scanLineY+20);
+      grad.addColorStop(0,'rgba(178,0,0,0)');grad.addColorStop(0.3,'rgba(178,0,0,0.2)');
+      grad.addColorStop(0.5,'rgba(220,38,38,0.6)');grad.addColorStop(0.7,'rgba(178,0,0,0.2)');
+      grad.addColorStop(1,'rgba(178,0,0,0)');
+      ctx.fillStyle=grad;ctx.fillRect(0,scanLineY-20,256,40);
+      ctx.shadowColor='#dc2626';ctx.shadowBlur=12;
+      ctx.fillStyle='rgba(220,38,38,0.5)';ctx.fillRect(0,scanLineY-1,256,2);ctx.shadowBlur=0;
+      var haloGrad=ctx.createLinearGradient(0,scanLineY-30,0,scanLineY+30);
+      haloGrad.addColorStop(0,'rgba(178,0,0,0)');haloGrad.addColorStop(0.5,'rgba(178,0,0,0.08)');
+      haloGrad.addColorStop(1,'rgba(178,0,0,0)');
+      ctx.fillStyle=haloGrad;ctx.fillRect(0,scanLineY-30,256,60);
+      obj.userData.scanTex.needsUpdate=true;
+    }
+  });
+
+  particleTime+=delta;
+  if(particles){
+    var posArr=particles.geometry.attributes.position.array;
+    for(var i=0;i<posArr.length/3;i++){
+      posArr[i*3+1]+=Math.sin(particleTime+i)*0.02;
+      if(posArr[i*3+1]>130)posArr[i*3+1]=-30;
+      if(posArr[i*3+1]<-40)posArr[i*3+1]=120;
+    }
+    particles.geometry.attributes.position.needsUpdate=true;
+  }
+  renderer.render(scene,camera);
+}
+
+// ── 启动 ──────────────────────────────────────────────────────────────
+try{
+  if(typeof THREE==='undefined'){setStatus('Three.js 加载失败','#ff4444');}
+  else{clock=new THREE.Clock();listenMessages();init();loadModels();animate();setTimeout(notifyReady,500);}
+}catch(e){setStatus('启动错误: '+e.message,'#ff4444');console.error(e);}
+</script>
+</body>
+</html>

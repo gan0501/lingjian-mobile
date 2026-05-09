@@ -1,0 +1,25 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "src/assets/font/AlimamaDaoLiTi.ttf",
+      "sha1": "76b027220672824376abe77360137f05d2f881e2"
+    },
+    {
+      "path": "src/assets/font/AlimamaDaoLiTi.woff",
+      "sha1": "e8ade2accf827f53956be8e3ab610f399469c35a"
+    },
+    {
+      "path": "src/assets/font/AlimamaDaoLiTi.woff2",
+      "sha1": "778f70da60439da8259473d0e42ef9e902194aa7"
+    },
+    {
+      "path": "src/assets/font/INSTRUCTION.txt",
+      "sha1": "e1b457173e30e6b0fa09cc4c9faff79cf03a042b"
+    },
+    {
+      "path": "src/assets/font/LICENSE.txt",
+      "sha1": "16b14738ed71c199147c5dd9c6b8bb95f9de064b"
+    }
+  ]
+}

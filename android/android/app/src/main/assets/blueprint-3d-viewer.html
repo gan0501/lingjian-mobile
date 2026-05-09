@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;touch-action:none}
+canvas{display:block}
+</style>
+</head>
+<body>
+<script src="file:///android_asset/three-all.js"></script>
+<script src="file:///android_asset/OrbitControls-r128.js"></script>
+<script>
+function post(obj){try{window.ReactNativeWebView.postMessage(JSON.stringify(obj));}catch(e){}}
+
+var scene, camera, renderer, controls;
+var concreteGroup, rebarGroup, annotationGroup;
+var allGroups = [];
+var currentLayer = 'all';
+var performanceLevel = 0;
+var fpsHistory = [];
+var lastFrameTime = Date.now();
+var SCALE = 0.01;
+
+function autoFitCamera(){
+  if(!concreteGroup && !rebarGroup) return;
+  var box = new THREE.Box3();
+  if(concreteGroup) box.expandByObject(concreteGroup);
+  if(rebarGroup) box.expandByObject(rebarGroup);
+  if(box.isEmpty()) return;
+  var center = box.getCenter(new THREE.Vector3());
+  var size = box.getSize(new THREE.Vector3());
+  var maxDim = Math.max(size.x, size.y, size.z);
+  if(maxDim === 0) return;
+  var dist = maxDim * 1.8;
+  camera.position.set(center.x + dist * 0.6, center.y + dist * 0.5, center.z + dist * 0.6);
+  camera.lookAt(center);
+  controls.target.copy(center);
+  controls.minDistance = maxDim * 0.1;
+  controls.maxDistance = maxDim * 10;
+  controls.update();
+}
+
+function init(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a1a2e);
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 5000);
+  camera.position.set(400, 350, 400);
+  camera.lookAt(0, 0, 0);
+  renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = false;
+  document.body.appendChild(renderer.domElement);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  var dl1 = new THREE.DirectionalLight(0xffffff, 0.8);
+  dl1.position.set(200, 400, 300);
+  scene.add(dl1);
+  var dl2 = new THREE.DirectionalLight(0x4488ff, 0.3);
+  dl2.position.set(-200, 100, -200);
+  scene.add(dl2);
+  var grid = new THREE.GridHelper(1000, 20, 0x333355, 0x222244);
+  grid.position.y = 0;
+  scene.add(grid);
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 100;
+  controls.maxDistance = 2000;
+  controls.target.set(0, 150, 0);
+  controls.update();
+  window.addEventListener('resize', onResize);
+  animate();
+}
+
+function onResize(){
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  var now = Date.now();
+  var dt = now - lastFrameTime;
+  lastFrameTime = now;
+  if(dt > 0){
+    fpsHistory.push(1000/dt);
+    if(fpsHistory.length > 30) fpsHistory.shift();
+  }
+}
+
+function getAvgFps(){
+  if(fpsHistory.length === 0) return 60;
+  return fpsHistory.reduce(function(a,b){return a+b;}, 0) / fpsHistory.length;
+}
+
+function getRadialSegments(){
+  if(performanceLevel >= 2) return 4;
+  if(performanceLevel >= 1) return 6;
+  return 8;
+}
+
+function clearScene(){
+  if(concreteGroup) scene.remove(concreteGroup);
+  if(rebarGroup) scene.remove(rebarGroup);
+  if(annotationGroup) scene.remove(annotationGroup);
+  concreteGroup = new THREE.Group();
+  concreteGroup.name = 'concrete';
+  rebarGroup = new THREE.Group();
+  rebarGroup.name = 'rebar';
+  annotationGroup = new THREE.Group();
+  annotationGroup.name = 'annotations';
+  allGroups = [concreteGroup, rebarGroup, annotationGroup];
+}
+
+function isBeam(p){ return p.component_type === 'beam'; }
+function isPile(p){ return p.component_type === 'pile'; }
+
+function buildConcreteShell(params){
+  var w = params.section.width * SCALE;
+  var h = params.section.height * SCALE;
+  var L = params.component_length * SCALE;
+  var shape = params.section_shape || 'rectangle';
+  var geom;
+  if(shape === 'circle'){
+    geom = new THREE.CylinderGeometry(w/2, w/2, L, 24);
+  } else if(isBeam(params)){
+    geom = new THREE.BoxGeometry(L, h, w);
+  } else {
+    geom = new THREE.BoxGeometry(w, L, h);
+  }
+  var mat = new THREE.MeshPhysicalMaterial({
+    color: 0x8899aa, transparent: true, opacity: 0.4,
+    roughness: 0.8, metalness: 0.0, transmission: 0.1,
+    side: THREE.DoubleSide, depthWrite: false
+  });
+  var mesh = new THREE.Mesh(geom, mat);
+  mesh.position.y = isBeam(params) ? h/2 : L/2;
+  var edges = new THREE.EdgesGeometry(geom);
+  var lineMat = new THREE.LineBasicMaterial({color: 0x556677, transparent:true, opacity:0.6});
+  var wireframe = new THREE.LineSegments(edges, lineMat);
+  wireframe.position.copy(mesh.position);
+  concreteGroup.add(mesh);
+  concreteGroup.add(wireframe);
+}
+
+function buildLongitudinalRebars(params){
+  var w = params.section.width * SCALE;
+  var h = params.section.height * SCALE;
+  var L = params.component_length * SCALE;
+  var cover = params.cover_thickness * SCALE;
+  var rs = getRadialSegments();
+  var shape = params.section_shape || 'rectangle';
+  var rebarMat = new THREE.MeshStandardMaterial({color: 0xff6600, metalness: 0.6, roughness: 0.3});
+  var rebars = params.longitudinal_rebars || [];
+
+  if(isBeam(params)){
+    var topRebar = rebars.filter(function(r){return r.usage === 'top_rebar';});
+    var botRebar = rebars.filter(function(r){return r.usage === 'bottom_rebar';});
+    if(topRebar.length > 0){
+      var tr = topRebar[0]; var count = tr.count || 2; var d = (tr.diameter || 25) * SCALE;
+      var topY = h/2 - cover - d/2;
+      var geom = new THREE.CylinderGeometry(d/2, d/2, L - 2*cover - d, rs);
+      for(var i = 0; i < count; i++){
+        var x = -w/2 + cover + d/2 + (i + 0.5) * (w - 2*cover - d) / count;
+        var m = new THREE.Mesh(geom, rebarMat); m.rotation.z = Math.PI/2; m.position.set(x, topY, 0);
+        rebarGroup.add(m);
+      }
+    }
+    if(botRebar.length > 0){
+      var br = botRebar[0]; var count = br.count || 2; var d = (br.diameter || 22) * SCALE;
+      var botY = -h/2 + cover + d/2;
+      var geom = new THREE.CylinderGeometry(d/2, d/2, L - 2*cover - d, rs);
+      for(var i = 0; i < count; i++){
+        var x = -w/2 + cover + d/2 + (i + 0.5) * (w - 2*cover - d) / count;
+        var m = new THREE.Mesh(geom, rebarMat); m.rotation.z = Math.PI/2; m.position.set(x, botY, 0);
+        rebarGroup.add(m);
+      }
+    }
+  } else {
+    var count = 8; var d = 20 * SCALE;
+    var usage = isPile(params) ? 'prestressed' : 'column_longitudinal';
+    var filtered = rebars.filter(function(r){return r.usage === usage || r.usage === 'column_longitudinal';});
+    if(filtered.length > 0){ count = filtered[0].count || 8; d = (filtered[0].diameter || 20) * SCALE; }
+    else if(rebars.length > 0){ count = rebars[0].count || 8; d = (rebars[0].diameter || 20) * SCALE; }
+    var geom = new THREE.CylinderGeometry(d/2, d/2, L - 2*cover - d, rs);
+    if(shape === 'circle'){
+      var radius = w/2 - cover - d/2;
+      for(var i = 0; i < count; i++){
+        var angle = (2 * Math.PI * i) / count;
+        var m = new THREE.Mesh(geom, rebarMat);
+        m.position.set(radius * Math.cos(angle), L/2, radius * Math.sin(angle));
+        rebarGroup.add(m);
+      }
+    } else {
+      var positions = getRectRebarPositions(w, h, cover, count, d);
+      for(var i = 0; i < positions.length; i++){
+        var m = new THREE.Mesh(geom, rebarMat);
+        m.position.set(positions[i][0], L/2, positions[i][1]);
+        rebarGroup.add(m);
+      }
+    }
+  }
+}
+
+function getRectRebarPositions(w, h, cover, count, d){
+  var positions = [];
+  var d2 = (d || 20*SCALE) / 2;
+  var iw = w - 2*cover - d; var ih = h - 2*cover - d;
+  var perSide = Math.max(2, Math.ceil(count / 4));
+  for(var i = 0; i < perSide; i++){
+    var z = -ih/2 + i * ih / (perSide - 1);
+    positions.push([-iw/2, z]); positions.push([iw/2, z]);
+  }
+  for(var i = 1; i < perSide - 1; i++){
+    var x = -iw/2 + i * iw / (perSide - 1);
+    positions.push([x, -ih/2]); positions.push([x, ih/2]);
+  }
+  return positions.slice(0, count);
+}
+
+function buildStirrups(params){
+  var w = params.section.width * SCALE;
+  var h = params.section.height * SCALE;
+  var L = params.component_length * SCALE;
+  var cover = params.cover_thickness * SCALE;
+  var stirrup = params.stirrup;
+  if(!stirrup) return;
+  var d = (stirrup.diameter || 8) * SCALE;
+  var encSpacing = (stirrup.encrypted_spacing || 100) * SCALE;
+  var nonEncSpacing = (stirrup.non_encrypted_spacing || 200) * SCALE;
+  var encLength = (stirrup.encrypted_length || Math.max(1.5 * params.section.height, 500)) * SCALE;
+  var stirType = stirrup.stirrup_type || 'rectangular';
+  var shape = params.section_shape || 'rectangle';
+  var rs = getRadialSegments();
+  var stirrupMat = new THREE.MeshStandardMaterial({color: 0x44cc44, metalness: 0.4, roughness: 0.5});
+
+  if(stirType === 'spiral' || shape === 'circle'){
+    buildSpiralStirrup(w, L, cover, d, encSpacing, rs, stirrupMat);
+    return;
+  }
+
+  var iw = w - 2*cover - d; var ih = h - 2*cover - d;
+  if(isBeam(params)){
+    var sp = []; var x = 50 * SCALE;
+    while(x < encLength){ sp.push(x); x += encSpacing; }
+    while(x < L/2 - 50){ sp.push(x); x += nonEncSpacing; }
+    var all = [];
+    for(var i = 0; i < sp.length; i++){ all.push(sp[i]); all.push(-sp[i]); }
+    for(var i = 0; i < all.length; i++){
+      var path = [
+        new THREE.Vector3(all[i],-ih/2,-iw/2), new THREE.Vector3(all[i],ih/2,-iw/2),
+        new THREE.Vector3(all[i],ih/2,iw/2), new THREE.Vector3(all[i],-ih/2,iw/2),
+        new THREE.Vector3(all[i],-ih/2,-iw/2)
+      ];
+      rebarGroup.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path), 32, d/2, rs, true), stirrupMat));
+    }
+  } else {
+    var yPos = cover + d/2 + encSpacing;
+    while(yPos < L - cover - d/2){
+      var path = [
+        new THREE.Vector3(-iw/2,yPos,-ih/2), new THREE.Vector3(iw/2,yPos,-ih/2),
+        new THREE.Vector3(iw/2,yPos,ih/2), new THREE.Vector3(-iw/2,yPos,ih/2),
+        new THREE.Vector3(-iw/2,yPos,-ih/2)
+      ];
+      rebarGroup.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path), 32, d/2, rs, true), stirrupMat));
+      yPos += encSpacing;
+    }
+  }
+}
+
+function buildSpiralStirrup(w, L, cover, d, spacing, rs, mat){
+  var radius = w/2 - cover - d/2;
+  var turns = L / (spacing || 1);
+  var points = [];
+  var segments = Math.max(60, Math.round(turns * 12));
+  for(var i = 0; i <= segments; i++){
+    var t = i / segments;
+    var angle = t * turns * 2 * Math.PI;
+    points.push(new THREE.Vector3(radius * Math.cos(angle), t * L, radius * Math.sin(angle)));
+  }
+  var curve = new THREE.CatmullRomCurve3(points);
+  rebarGroup.add(new THREE.Mesh(new THREE.TubeGeometry(curve, segments, d/2, rs, true), mat));
+}
+
+function buildAnnotations(params){
+  var w = params.section.width * SCALE;
+  var h = params.section.height * SCALE;
+  var L = params.component_length * SCALE;
+  var cover = params.cover_thickness * SCALE;
+  var compId = params.component_id || '';
+  var shape = params.section_shape || 'rectangle';
+  var sizeStr = shape === 'circle' ? ('D' + params.section.width) : (params.section.width + 'x' + params.section.height);
+  var labelY = isBeam(params) ? (h + 20*SCALE) : (L + 20*SCALE);
+  addSpriteLabel(compId + ' ' + sizeStr, 0, labelY, 0, 28, '#ffffff', '#333333');
+  var conc = params.concentrated_mark;
+  if(conc){
+    if(isBeam(params)){
+      if(conc.top_rebar) addSpriteLabel('上:' + conc.top_rebar, -L/4, h/2 - cover + 10*SCALE, w/2 + 15*SCALE, 20, '#ff6600', '#000000');
+      if(conc.bottom_rebar) addSpriteLabel('下:' + conc.bottom_rebar, -L/4, -h/2 + cover - 10*SCALE, w/2 + 15*SCALE, 20, '#ff6600', '#000000');
+    }
+    if(conc.stirrup) addSpriteLabel('箍:' + conc.stirrup, 0, 0, w/2 + 20*SCALE, 18, '#44cc44', '#000000');
+  }
+}
+
+function addSpriteLabel(text, x, y, z, fontSize, textColor, bgColor){
+  var canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 64;
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = bgColor || 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, 256, 64);
+  ctx.fillStyle = textColor || '#ffffff';
+  ctx.font = 'bold ' + (fontSize || 24) + 'px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 32);
+  var texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  var spriteMat = new THREE.SpriteMaterial({map: texture, transparent: true});
+  var sprite = new THREE.Sprite(spriteMat);
+  sprite.position.set(x, y, z);
+  sprite.scale.set(60*SCALE, 15*SCALE, 1);
+  annotationGroup.add(sprite);
+}
+
+function buildModel(componentParamsList){
+  try{
+    clearScene();
+    var paramsList = componentParamsList;
+    if(!Array.isArray(paramsList)) paramsList = [componentParamsList];
+    for(var i = 0; i < paramsList.length; i++){
+      var params = paramsList[i];
+      if(performanceLevel < 3) buildConcreteShell(params);
+      if(performanceLevel < 3) buildLongitudinalRebars(params);
+      if(performanceLevel < 2) buildStirrups(params);
+      buildAnnotations(params);
+    }
+    scene.add(concreteGroup);
+    scene.add(rebarGroup);
+    scene.add(annotationGroup);
+    autoFitCamera();
+    var totalFaces = 0;
+    scene.traverse(function(obj){
+      if(obj.isMesh && obj.geometry){
+        var idx = obj.geometry.index;
+        totalFaces += idx ? idx.count / 3 : (obj.geometry.attributes.position.count / 3);
+      }
+    });
+    setTimeout(function(){
+      var fps = getAvgFps();
+      if(fps < 20 && performanceLevel < 3){
+        performanceLevel++;
+        buildModel(componentParamsList);
+        return;
+      }
+      post({type:'MODEL_READY', faces:totalFaces, fps:fps, perfLevel:performanceLevel});
+    }, 3000);
+  } catch(e){
+    post({type:'RENDER_ERROR', error: e.message || String(e)});
+  }
+}
+
+function switchLayer(mode){
+  currentLayer = mode;
+  if(!concreteGroup || !rebarGroup) return;
+  concreteGroup.visible = (mode === 'all' || mode === 'concrete');
+  rebarGroup.visible = (mode === 'all' || mode === 'rebar');
+  annotationGroup.visible = true;
+}
+
+init();
+</script>
+</body>
+</html>

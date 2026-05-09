@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">192.168.1.5</domain>
+        <domain includeSubdomains="true">192.168.31.133</domain>
+        <domain includeSubdomains="true">192.168.50.166</domain>
+        <domain includeSubdomains="true">restapi.amap.com</domain>
+        <domain includeSubdomains="true">lingjianai.cn</domain>
+        <domain includeSubdomains="true">linkbuild.com.cn</domain>
+        <domain includeSubdomains="true">tianditu.gov.cn</domain>
+        <domain includeSubdomains="true">42.121.241.190</domain>
+        <domain includeSubdomains="true">volces.com</domain>
+    </domain-config>
+</network-security-config>

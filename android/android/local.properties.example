@@ -1,0 +1,8 @@
+# 本地配置文件示例
+# 复制此文件为 local.properties 并填入真实值
+
+# 发布签名配置
+RELEASE_STORE_FILE=D:/LingjianAI/secretKey_old_uniapp/secretKey/android/0a75b8f10f3ad3c50c3a072a9669beec.keystore
+RELEASE_STORE_PASSWORD=your_store_password
+RELEASE_KEY_ALIAS=__uni__d99084d
+RELEASE_KEY_PASSWORD=your_key_password
