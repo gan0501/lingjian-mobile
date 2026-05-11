@@ -1,0 +1,2175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>井坑详图绘制工具 - Demo</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Microsoft YaHei', sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; height: 100vh; }
+
+.app-header { height: 48px; background: #16213e; display: flex; align-items: center; padding: 0 20px; border-bottom: 1px solid #0f3460; }
+.app-header h1 { font-size: 16px; font-weight: 500; color: #e94560; }
+.app-header .subtitle { margin-left: 12px; font-size: 12px; color: #888; }
+
+.step-tabs { display: flex; height: 40px; background: #16213e; border-bottom: 1px solid #0f3460; }
+.step-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; font-size: 13px; color: #888; border-right: 1px solid #0f3460; transition: all 0.2s; }
+.step-tab:last-child { border-right: none; }
+.step-tab.active { color: #e94560; background: rgba(233,69,96,0.08); }
+.step-tab .step-num { width: 20px; height: 20px; border-radius: 50%; background: #0f3460; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+.step-tab.active .step-num { background: #e94560; color: #fff; }
+.step-tab.completed .step-num { background: #4caf50; color: #fff; }
+.step-tab:hover { background: rgba(233,69,96,0.05); }
+
+.main-area { display: flex; height: calc(100vh - 88px); }
+
+.toolbar { width: 56px; background: #16213e; border-right: 1px solid #0f3460; display: flex; flex-direction: column; padding: 8px 0; }
+.tool-btn { width: 56px; height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; color: #888; font-size: 10px; transition: all 0.2s; border: none; background: none; }
+.tool-btn svg { width: 20px; height: 20px; }
+.tool-btn:hover { color: #e94560; background: rgba(233,69,96,0.08); }
+.tool-btn.active { color: #e94560; background: rgba(233,69,96,0.12); }
+
+.canvas-container { flex: 1; position: relative; background: #0f0f23; overflow: hidden; }
+#mainCanvas { width: 100%; height: 100%; cursor: crosshair; }
+
+.props-panel { width: 280px; background: #16213e; border-left: 1px solid #0f3460; overflow-y: auto; padding: 16px; display: none; }
+.props-panel.visible { display: block; }
+.props-panel h3 { font-size: 13px; color: #e94560; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #0f3460; }
+.prop-group { margin-bottom: 16px; }
+.prop-group label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+.prop-group input { width: 100%; height: 32px; background: #0f3460; border: 1px solid #1a1a4e; border-radius: 4px; color: #e0e0e0; padding: 0 8px; font-size: 13px; }
+.prop-group input:focus { border-color: #e94560; outline: none; }
+.prop-row { display: flex; gap: 8px; }
+.prop-row .prop-group { flex: 1; }
+.btn { height: 32px; border-radius: 4px; border: none; cursor: pointer; font-size: 12px; padding: 0 16px; transition: all 0.2s; }
+.btn-primary { background: #e94560; color: #fff; }
+.btn-primary:hover { background: #c73652; }
+.btn-outline { background: transparent; border: 1px solid #0f3460; color: #888; }
+.btn-outline:hover { border-color: #e94560; color: #e94560; }
+.btn-block { width: 100%; }
+
+.snap-indicator { position: absolute; bottom: 8px; left: 8px; font-size: 11px; color: #4caf50; display: flex; align-items: center; gap: 4px; }
+.snap-indicator.hidden { display: none; }
+
+.three-container { flex: 1; position: relative; background: #0f0f23; }
+.three-container canvas { width: 100%; height: 100%; }
+
+.section-panel { position: absolute; top: 0; right: 0; width: 40%; height: 100%; background: #16213e; border-left: 2px solid #e94560; display: flex; flex-direction: column; }
+.section-result { flex: 1; padding: 8px; overflow: hidden; }
+.section-result h4 { font-size: 12px; color: #e94560; margin-bottom: 8px; }
+#sectionCanvas { background: #0f0f23; border: 1px solid #0f3460; }
+
+.export-bar { position: absolute; top: 8px; right: 8px; display: flex; gap: 8px; }
+
+.pit-list { margin-top: 16px; }
+.pit-item { padding: 8px; background: #0f3460; border-radius: 4px; margin-bottom: 4px; font-size: 11px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.pit-item:hover { background: #1a1a5e; }
+.pit-item.selected { border: 1px solid #e94560; }
+.pit-item .delete-btn { color: #e94560; cursor: pointer; font-size: 14px; }
+
+.section-line-info { position: absolute; top: 8px; left: 8px; font-size: 11px; color: #e94560; background: rgba(22,33,62,0.9); padding: 6px 12px; border-radius: 4px; }
+
+.empty-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #555; font-size: 14px; pointer-events: none; }
+.empty-hint svg { width: 48px; height: 48px; margin-bottom: 12px; fill: #333; }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <h1>井坑详图绘制</h1>
+  <span class="subtitle">电梯井 / 集水井 平面 & 剖面图生成工具</span>
+</div>
+
+<div class="step-tabs">
+  <div class="step-tab active" data-step="1" onclick="switchStep(1)">
+    <span class="step-num">1</span> 平面布局
+  </div>
+  <div class="step-tab" data-step="2" onclick="switchStep(2)">
+    <span class="step-num">2</span> 三维预览
+  </div>
+  <div class="step-tab" data-step="3" onclick="switchStep(3)">
+    <span class="step-num">3</span> 剖面导出
+  </div>
+</div>
+
+<div class="main-area">
+  <!-- Step 1: 平面布局 -->
+  <div id="step1Area" style="display:flex; width:100%; height:100%;">
+    <div class="toolbar">
+      <button class="tool-btn active" data-tool="select" onclick="setTool('select')" title="选择">
+        <svg viewBox="0 0 24 24"><path d="M3 3l7.5 18 2.5-7 7-2.5z" fill="currentColor"/></svg>
+        选择
+      </button>
+      <button class="tool-btn" data-tool="rect" onclick="setTool('rect')" title="矩形坑">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        矩形
+      </button>
+      <button class="tool-btn" data-tool="circle" onclick="setTool('circle')" title="圆形坑">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        圆形
+      </button>
+      <div style="flex:1;"></div>
+      <button class="tool-btn" onclick="zoomFit()" title="适应画布">
+        <svg viewBox="0 0 24 24"><path d="M3 5v14h18V5H3zm16 12H5V7h14v10z" fill="currentColor"/></svg>
+        适应
+      </button>
+    </div>
+
+    <div class="canvas-container" id="canvasContainer">
+      <canvas id="mainCanvas"></canvas>
+      <div class="snap-indicator hidden" id="snapIndicator">
+        <svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="#4caf50"/></svg>
+        <span id="snapText">吸附对齐</span>
+      </div>
+      <div class="empty-hint" id="emptyHint">
+        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zm-7-2h2V7h-2v10zm-4 0h2V7H8v10z"/></svg>
+        选择矩形或圆形工具，在画布中拖拽绘制坑体
+      </div>
+    </div>
+
+    <div class="props-panel" id="propsPanel">
+      <h3 id="propsTitle">构件列表</h3>
+      <div id="pitList"></div>
+      <div id="propsContent"></div>
+    </div>
+  </div>
+
+  <!-- Step 2: 三维预览 -->
+  <div id="step2Area" style="display:none; width:100%; height:100%;">
+    <div class="canvas-container" id="threeContainer">
+      <div class="props-panel visible" id="threePropsPanel" style="position:absolute;right:0;top:0;bottom:0;z-index:10;">
+        <h3>坑体厚度参数</h3>
+        <div id="threePropsContent"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: 剖面导出 -->
+  <div id="step3Area" style="display:none; width:100%; height:100%; position:relative;">
+    <div style="width:60%; height:100%; position:relative; background:#0f0f23;" id="section3DContainer">
+      <div class="section-line-info" id="sectionLineInfo">点击"画剖面线"按钮，然后在俯视图上拖拽绘制</div>
+      <div class="export-bar">
+        <button class="btn btn-outline" id="sectionDrawBtn" onclick="toggleSectionDrawMode()">画剖面线</button>
+        <button class="btn btn-outline" onclick="exportDXF()">导出 DXF</button>
+        <button class="btn btn-primary" onclick="exportPNG()">导出 PNG</button>
+      </div>
+    </div>
+    <div class="section-panel" id="sectionPanel">
+      <div class="section-result">
+        <h4>平面图（带标注）</h4>
+        <canvas id="planCanvas" width="600" height="400"></canvas>
+      </div>
+      <div class="section-result">
+        <h4>剖面图（带标注）</h4>
+        <canvas id="sectionCanvas" width="600" height="400"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+// ============ 全局状态 ============
+const state = {
+  currentStep: 1,
+  currentTool: 'select',
+  pits: [],
+  selectedPitId: null,
+  isDragging: false,
+  dragStart: null,
+  dragCurrent: null,
+  isMoving: false,
+  moveOffset: null,
+  snapInfo: null,
+  canvasOffset: { x: 0, y: 0 },
+  canvasScale: 1,
+  nextId: 1,
+  sectionLine: null,
+  isDrawingSection: false,
+  slabThickness: 800,
+  slabMembraneThk: 100,
+  sectionDrawMode: false,
+};
+
+const SNAP_THRESHOLD = 8;
+const SCALE = 5; // 1单位 = 5px
+
+// ============ 画布初始化 ============
+const canvas = document.getElementById('mainCanvas');
+const ctx = canvas.getContext('2d');
+let canvasW, canvasH;
+
+function resizeCanvas() {
+  const container = document.getElementById('canvasContainer');
+  canvasW = container.clientWidth;
+  canvasH = container.clientHeight;
+  canvas.width = canvasW * devicePixelRatio;
+  canvas.height = canvasH * devicePixelRatio;
+  canvas.style.width = canvasW + 'px';
+  canvas.style.height = canvasH + 'px';
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  render();
+}
+
+window.addEventListener('resize', () => {
+  resizeCanvas();
+  if (state.currentStep === 2 || state.currentStep === 3) resizeThree();
+});
+
+function toWorld(sx, sy) {
+  return {
+    x: (sx - canvasW / 2 - state.canvasOffset.x) / state.canvasScale,
+    y: (sy - canvasH / 2 - state.canvasOffset.y) / state.canvasScale
+  };
+}
+
+function toScreen(wx, wy) {
+  return {
+    x: wx * state.canvasScale + canvasW / 2 + state.canvasOffset.x,
+    y: wy * state.canvasScale + canvasH / 2 + state.canvasOffset.y
+  };
+}
+
+// ============ 坑体数据 ============
+function createPit(type, cx, cy, props) {
+  const defaults = {
+    rect: { width: 2000, height: 2000, topElev: -0.5, bottomElev: -2.0, wallThk: 300, membraneThk: 100, bottomThk: 400, bottomMembraneThk: 100 },
+    circle: { diameter: 2000, topElev: -0.5, bottomElev: -2.0, wallThk: 300, membraneThk: 100, bottomThk: 400, bottomMembraneThk: 100 }
+  };
+  const d = defaults[type];
+  const pit = {
+    id: state.nextId++,
+    type,
+    cx, cy,
+    name: type === 'rect' ? '矩形井' : '圆形井',
+    ...d,
+    ...props
+  };
+  pit.depth = pit.topElev - pit.bottomElev;
+  state.pits.push(pit);
+  return pit;
+}
+
+function getPitBounds(pit) {
+  if (pit.type === 'rect') {
+    const hw = pit.width / 2, hh = pit.height / 2;
+    return { left: pit.cx - hw, top: pit.cy - hh, right: pit.cx + hw, bottom: pit.cy + hh };
+  } else {
+    const r = pit.diameter / 2;
+    return { left: pit.cx - r, top: pit.cy - r, right: pit.cx + r, bottom: pit.cy + r };
+  }
+}
+
+function pointInPit(pit, wx, wy) {
+  if (pit.type === 'rect') {
+    const b = getPitBounds(pit);
+    return wx >= b.left && wx <= b.right && wy >= b.top && wy <= b.bottom;
+  } else {
+    const r = pit.diameter / 2;
+    return Math.hypot(wx - pit.cx, wy - pit.cy) <= r;
+  }
+}
+
+// ============ 渲染 ============
+function render() {
+  ctx.clearRect(0, 0, canvasW, canvasH);
+  drawGrid();
+  drawPits();
+  drawSnapGuides();
+  drawDragPreview();
+  updateEmptyHint();
+}
+
+function drawGrid() {
+  const baseGrid = 500;
+  const gridSize = baseGrid * state.canvasScale;
+  if (gridSize < 8) return;
+  const ox = (canvasW / 2 + state.canvasOffset.x) % gridSize;
+  const oy = (canvasH / 2 + state.canvasOffset.y) % gridSize;
+  ctx.strokeStyle = 'rgba(15,52,96,0.5)';
+  ctx.lineWidth = 0.5;
+  for (let x = ox; x < canvasW; x += gridSize) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvasH); ctx.stroke();
+  }
+  for (let y = oy; y < canvasH; y += gridSize) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvasW, y); ctx.stroke();
+  }
+  const majorGrid = gridSize * 5;
+  const mox = (canvasW / 2 + state.canvasOffset.x) % majorGrid;
+  const moy = (canvasH / 2 + state.canvasOffset.y) % majorGrid;
+  ctx.strokeStyle = 'rgba(15,52,96,0.9)';
+  ctx.lineWidth = 1;
+  for (let x = mox; x < canvasW; x += majorGrid) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvasH); ctx.stroke();
+  }
+  for (let y = moy; y < canvasH; y += majorGrid) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvasW, y); ctx.stroke();
+  }
+  if (majorGrid > 30) {
+    ctx.fillStyle = 'rgba(74,143,231,0.4)';
+    ctx.font = '10px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    for (let x = mox; x < canvasW; x += majorGrid) {
+      const worldX = Math.round((x - canvasW / 2 - state.canvasOffset.x) / state.canvasScale);
+      if (worldX !== 0) ctx.fillText(worldX + '', x, canvasH / 2 + state.canvasOffset.y + 14);
+    }
+    ctx.textAlign = 'right';
+    for (let y = moy; y < canvasH; y += majorGrid) {
+      const worldY = Math.round((y - canvasH / 2 - state.canvasOffset.y) / state.canvasScale);
+      if (worldY !== 0) ctx.fillText(worldY + '', canvasW / 2 + state.canvasOffset.x - 4, y + 4);
+    }
+  }
+}
+
+function drawPits() {
+  for (const pit of state.pits) {
+    const isSelected = pit.id === state.selectedPitId;
+    const s = toScreen(pit.cx, pit.cy);
+
+    if (pit.type === 'rect') {
+      const sw = pit.width * state.canvasScale;
+      const sh = pit.height * state.canvasScale;
+      ctx.save();
+      ctx.fillStyle = isSelected ? 'rgba(233,69,96,0.15)' : 'rgba(15,52,96,0.4)';
+      ctx.strokeStyle = isSelected ? '#e94560' : '#4a8fe7';
+      ctx.lineWidth = isSelected ? 2 : 1.5;
+      ctx.fillRect(s.x - sw / 2, s.y - sh / 2, sw, sh);
+      ctx.strokeRect(s.x - sw / 2, s.y - sh / 2, sw, sh);
+
+      ctx.strokeStyle = isSelected ? 'rgba(233,69,96,0.4)' : 'rgba(74,143,231,0.3)';
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash([4, 4]);
+      const wallPx = pit.wallThk * state.canvasScale;
+      const memPx = pit.membraneThk * state.canvasScale;
+      const outerW = sw + 2 * (wallPx + memPx);
+      const outerH = sh + 2 * (wallPx + memPx);
+      ctx.strokeRect(s.x - outerW / 2, s.y - outerH / 2, outerW, outerH);
+      const wallW = sw + 2 * wallPx;
+      const wallH = sh + 2 * wallPx;
+      ctx.strokeRect(s.x - wallW / 2, s.y - wallH / 2, wallW, wallH);
+      ctx.setLineDash([]);
+      ctx.restore();
+    } else {
+      const sr = pit.diameter / 2 * state.canvasScale;
+      ctx.save();
+      ctx.fillStyle = isSelected ? 'rgba(233,69,96,0.15)' : 'rgba(15,52,96,0.4)';
+      ctx.strokeStyle = isSelected ? '#e94560' : '#4a8fe7';
+      ctx.lineWidth = isSelected ? 2 : 1.5;
+      ctx.beginPath(); ctx.arc(s.x, s.y, sr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+      ctx.strokeStyle = isSelected ? 'rgba(233,69,96,0.4)' : 'rgba(74,143,231,0.3)';
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash([4, 4]);
+      const wallPx = pit.wallThk * state.canvasScale;
+      const memPx = pit.membraneThk * state.canvasScale;
+      ctx.beginPath(); ctx.arc(s.x, s.y, sr + wallPx, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(s.x, s.y, sr + wallPx + memPx, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    ctx.fillStyle = isSelected ? '#e94560' : '#4a8fe7';
+    ctx.font = '11px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    const labelY = pit.type === 'rect'
+      ? s.y - pit.height / 2 * state.canvasScale - 8
+      : s.y - pit.diameter / 2 * state.canvasScale - 8;
+    ctx.fillText(pit.name, s.x, labelY);
+
+    if (isSelected) {
+      drawDimensions(pit);
+    }
+  }
+}
+
+function drawDimensions(pit) {
+  ctx.strokeStyle = '#e94560';
+  ctx.fillStyle = '#e94560';
+  ctx.lineWidth = 1;
+  ctx.font = '10px Microsoft YaHei';
+  ctx.textAlign = 'center';
+
+  if (pit.type === 'rect') {
+    const b = getPitBounds(pit);
+    const tl = toScreen(b.left, b.top);
+    const tr = toScreen(b.right, b.top);
+    const bl = toScreen(b.left, b.bottom);
+    const dimOff = 20;
+    ctx.beginPath(); ctx.moveTo(tl.x, tl.y - dimOff); ctx.lineTo(tr.x, tr.y - dimOff); ctx.stroke();
+    ctx.fillText(pit.width + '', (tl.x + tr.x) / 2, tl.y - dimOff - 4);
+    ctx.beginPath(); ctx.moveTo(tl.x - dimOff, tl.y); ctx.lineTo(bl.x - dimOff, bl.y); ctx.stroke();
+    ctx.save(); ctx.translate(tl.x - dimOff - 4, (tl.y + bl.y) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(pit.height + '', 0, 0); ctx.restore();
+  } else {
+    const s = toScreen(pit.cx, pit.cy);
+    const sr = pit.diameter / 2 * state.canvasScale;
+    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x + sr, s.y); ctx.stroke();
+    ctx.fillText('⌀' + pit.diameter, s.x + sr / 2, s.y - 6);
+  }
+}
+
+function drawSnapGuides() {
+  if (!state.snapInfo) return;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(76,175,80,0.6)';
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([3, 3]);
+  for (const guide of state.snapInfo.guides) {
+    ctx.beginPath();
+    if (guide.type === 'h') {
+      const y = guide.value * state.canvasScale + canvasH / 2 + state.canvasOffset.y;
+      ctx.moveTo(0, y); ctx.lineTo(canvasW, y);
+    } else {
+      const x = guide.value * state.canvasScale + canvasW / 2 + state.canvasOffset.x;
+      ctx.moveTo(x, 0); ctx.lineTo(canvasH, x);
+    }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawDragPreview() {
+  if (!state.isDragging || !state.dragStart || !state.dragCurrent) return;
+  if (state.currentTool === 'rect' || state.currentTool === 'circle') {
+    const s1 = state.dragStart;
+    const s2 = state.dragCurrent;
+    ctx.save();
+    ctx.strokeStyle = '#e94560';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 5]);
+    if (state.currentTool === 'rect') {
+      ctx.strokeRect(Math.min(s1.x, s2.x), Math.min(s1.y, s2.y), Math.abs(s2.x - s1.x), Math.abs(s2.y - s1.y));
+    } else {
+      const r = Math.hypot(s2.x - s1.x, s2.y - s1.y);
+      ctx.beginPath(); ctx.arc(s1.x, s1.y, r, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+}
+
+function updateEmptyHint() {
+  document.getElementById('emptyHint').style.display = state.pits.length === 0 ? 'block' : 'none';
+}
+
+// ============ 吸附对齐 ============
+function calcSnap(pit, newCx, newCy) {
+  if (state.pits.length < 2) return { cx: newCx, cy: newCy, guides: [] };
+  const guides = [];
+  let bestDx = Infinity, bestDy = Infinity, snapCx = newCx, snapCy = newCy;
+  const curB = getPitBounds({ ...pit, cx: newCx, cy: newCy });
+  const curCx = (curB.left + curB.right) / 2;
+  const curCy = (curB.top + curB.bottom) / 2;
+
+  for (const other of state.pits) {
+    if (other.id === pit.id) continue;
+    const oB = getPitBounds(other);
+    const oCx = (oB.left + oB.right) / 2;
+    const oCy = (oB.top + oB.bottom) / 2;
+
+    const checks = [
+      { my: curB.left, oy: oB.left, axis: 'v', label: '左对齐' },
+      { my: curB.left, oy: oB.right, axis: 'v', label: '左贴右' },
+      { my: curB.right, oy: oB.right, axis: 'v', label: '右对齐' },
+      { my: curB.right, oy: oB.left, axis: 'v', label: '右贴左' },
+      { my: curCx, oy: oCx, axis: 'v', label: '中心X' },
+      { my: curB.top, oy: oB.top, axis: 'h', label: '顶对齐' },
+      { my: curB.top, oy: oB.bottom, axis: 'h', label: '顶贴底' },
+      { my: curB.bottom, oy: oB.bottom, axis: 'h', label: '底对齐' },
+      { my: curB.bottom, oy: oB.top, axis: 'h', label: '底贴顶' },
+      { my: curCy, oy: oCy, axis: 'h', label: '中心Y' },
+    ];
+
+    for (const ck of checks) {
+      const dist = Math.abs(ck.my - ck.oy);
+      const thresh = SNAP_THRESHOLD / state.canvasScale;
+      if (ck.axis === 'v' && dist < thresh && dist < Math.abs(bestDx)) {
+        bestDx = ck.oy - ck.my + (ck.axis === 'v' ? newCx - curCx : 0);
+        snapCx = newCx + bestDx;
+        guides.push({ type: 'v', value: ck.oy, label: ck.label });
+      }
+      if (ck.axis === 'h' && dist < thresh && dist < Math.abs(bestDy)) {
+        bestDy = ck.oy - ck.my + (ck.axis === 'h' ? newCy - curCy : 0);
+        snapCy = newCy + bestDy;
+        guides.push({ type: 'h', value: ck.oy, label: ck.label });
+      }
+    }
+  }
+
+  if (Math.abs(bestDx) >= Infinity) snapCx = newCx;
+  if (Math.abs(bestDy) >= Infinity) snapCy = newCy;
+
+  const snapped = Math.abs(snapCx - newCx) > 0.01 || Math.abs(snapCy - newCy) > 0.01;
+  return { cx: snapCx, cy: snapCy, guides: snapped ? guides : [], snapped };
+}
+
+// ============ 交互事件 ============
+let mouseDown = false;
+let lastMouse = { x: 0, y: 0 };
+
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  const w = toWorld(sx, sy);
+  mouseDown = true;
+  lastMouse = { x: sx, y: sy };
+
+  if (state.currentTool === 'select') {
+    let found = null;
+    for (let i = state.pits.length - 1; i >= 0; i--) {
+      if (pointInPit(state.pits[i], w.x, w.y)) { found = state.pits[i]; break; }
+    }
+    if (found) {
+      state.selectedPitId = found.id;
+      state.isMoving = true;
+      state.moveOffset = { x: w.x - found.cx, y: w.y - found.cy };
+      canvas.style.cursor = 'move';
+    } else {
+      state.selectedPitId = null;
+      state.isMoving = false;
+    }
+    updatePropsPanel();
+    render();
+  } else if (state.currentTool === 'rect' || state.currentTool === 'circle') {
+    state.isDragging = true;
+    state.dragStart = { x: sx, y: sy };
+    state.dragCurrent = { x: sx, y: sy };
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  const w = toWorld(sx, sy);
+
+  if (state.isMoving && state.selectedPitId) {
+    const pit = state.pits.find(p => p.id === state.selectedPitId);
+    if (pit) {
+      let newCx = w.x - state.moveOffset.x;
+      let newCy = w.y - state.moveOffset.y;
+      const snap = calcSnap(pit, newCx, newCy);
+      pit.cx = snap.cx;
+      pit.cy = snap.cy;
+      state.snapInfo = snap.guides.length ? { guides: snap.guides } : null;
+      const si = document.getElementById('snapIndicator');
+      const st = document.getElementById('snapText');
+      if (snap.snapped) {
+        si.classList.remove('hidden');
+        st.textContent = snap.guides.map(g => g.label).join(', ');
+      } else {
+        si.classList.add('hidden');
+      }
+      render();
+    }
+    return;
+  }
+
+  if (state.isDragging) {
+    state.dragCurrent = { x: sx, y: sy };
+    render();
+    return;
+  }
+
+  if (!mouseDown && state.currentTool === 'select') {
+    let hovering = false;
+    for (let i = state.pits.length - 1; i >= 0; i--) {
+      if (pointInPit(state.pits[i], w.x, w.y)) { hovering = true; break; }
+    }
+    canvas.style.cursor = hovering ? 'pointer' : 'default';
+  }
+
+  if (mouseDown && !state.isDragging && !state.isMoving) {
+    const dx = sx - lastMouse.x, dy = sy - lastMouse.y;
+    state.canvasOffset.x += dx;
+    state.canvasOffset.y += dy;
+    lastMouse = { x: sx, y: sy };
+    render();
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  mouseDown = false;
+
+  if (state.isMoving) {
+    state.isMoving = false;
+    state.snapInfo = null;
+    document.getElementById('snapIndicator').classList.add('hidden');
+    canvas.style.cursor = 'default';
+    return;
+  }
+
+  if (state.isDragging && state.dragStart) {
+    const w1 = toWorld(state.dragStart.x, state.dragStart.y);
+    const w2 = toWorld(sx, sy);
+    const minSize = 20 / state.canvasScale;
+
+    if (state.currentTool === 'rect') {
+      const w = Math.abs(w2.x - w1.x);
+      const h = Math.abs(w2.y - w1.y);
+      if (w > minSize && h > minSize) {
+        const cx = (w1.x + w2.x) / 2, cy = (w1.y + w2.y) / 2;
+        const pit = createPit('rect', cx, cy, { width: Math.round(w), height: Math.round(h) });
+        state.selectedPitId = pit.id;
+        updatePropsPanel();
+      }
+    } else if (state.currentTool === 'circle') {
+      const r = Math.hypot(w2.x - w1.x, w2.y - w1.y);
+      if (r > minSize / 2) {
+        const pit = createPit('circle', w1.x, w1.y, { diameter: Math.round(r * 2) });
+        state.selectedPitId = pit.id;
+        updatePropsPanel();
+      }
+    }
+
+    state.isDragging = false;
+    state.dragStart = null;
+    state.dragCurrent = null;
+    render();
+  }
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  state.canvasScale = Math.max(0.1, Math.min(10, state.canvasScale * factor));
+  render();
+}, { passive: false });
+
+// ============ 工具切换 ============
+window.setTool = function(tool) {
+  state.currentTool = tool;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  canvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
+};
+
+window.zoomFit = function() {
+  if (state.pits.length === 0) { state.canvasOffset = { x: 0, y: 0 }; state.canvasScale = 1; render(); return; }
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of state.pits) {
+    const b = getPitBounds(p);
+    minX = Math.min(minX, b.left - 100); minY = Math.min(minY, b.top - 100);
+    maxX = Math.max(maxX, b.right + 100); maxY = Math.max(maxY, b.bottom + 100);
+  }
+  const w = maxX - minX, h = maxY - minY;
+  state.canvasScale = Math.min(canvasW / w, canvasH / h) * 0.85;
+  state.canvasOffset.x = -(minX + maxX) / 2 * state.canvasScale;
+  state.canvasOffset.y = -(minY + maxY) / 2 * state.canvasScale;
+  render();
+};
+
+// ============ 属性面板 ============
+function updatePropsPanel() {
+  const panel = document.getElementById('propsPanel');
+  const content = document.getElementById('propsContent');
+  const list = document.getElementById('pitList');
+
+  if (state.pits.length === 0) {
+    panel.classList.remove('visible');
+    return;
+  }
+  panel.classList.add('visible');
+
+  let html = '';
+  for (const p of state.pits) {
+    const sel = p.id === state.selectedPitId;
+    html += `<div class="pit-item ${sel ? 'selected' : ''}" onclick="selectPit(${p.id})" style="flex-wrap:wrap;">
+      <span style="flex:1;">${sel ? '▼' : '▶'} ${p.name} #${p.id}</span>
+      <span class="delete-btn" onclick="event.stopPropagation();deletePit(${p.id})">✕</span>`;
+
+    if (sel) {
+      html += `<div style="width:100%;margin-top:8px;padding-top:8px;border-top:1px solid #0f3460;" onclick="event.stopPropagation();">`;
+      html += `<div class="prop-group"><label>名称</label><input type="text" value="${p.name}" onchange="updatePitProp(${p.id},'name',this.value)"></div>`;
+
+      if (p.type === 'rect') {
+        html += `<div class="prop-row">
+          <div class="prop-group"><label>宽度(mm)</label><input type="number" value="${p.width}" onchange="updatePitProp(${p.id},'width',+this.value)"></div>
+          <div class="prop-group"><label>高度(mm)</label><input type="number" value="${p.height}" onchange="updatePitProp(${p.id},'height',+this.value)"></div>
+        </div>`;
+      } else {
+        html += `<div class="prop-group"><label>直径(mm)</label><input type="number" value="${p.diameter}" onchange="updatePitProp(${p.id},'diameter',+this.value)"></div>`;
+      }
+
+      html += `<div class="prop-row">
+        <div class="prop-group"><label>顶标高(m)</label><input type="number" step="0.1" value="${p.topElev}" onchange="updatePitProp(${p.id},'topElev',+this.value)"></div>
+        <div class="prop-group"><label>底标高(m)</label><input type="number" step="0.1" value="${p.bottomElev}" onchange="updatePitProp(${p.id},'bottomElev',+this.value)"></div>
+      </div>`;
+      html += `<div class="prop-group"><label>深度: ${((p.topElev - p.bottomElev) * 1000).toFixed(0)}mm (${(p.topElev - p.bottomElev).toFixed(3)}m)</label></div>`;
+
+      html += `<div style="font-size:12px;color:#4a8fe7;margin:12px 0 6px;">厚度参数</div>`;
+      html += `<div class="prop-row">
+        <div class="prop-group"><label>底板厚(mm)</label><input type="number" value="${state.slabThickness}" oninput="state.slabThickness=+this.value;render();"></div>
+        <div class="prop-group"><label>底板底膜(mm)</label><input type="number" value="${state.slabMembraneThk}" oninput="state.slabMembraneThk=+this.value;render();"></div>
+      </div>`;
+      html += `<div class="prop-row">
+        <div class="prop-group"><label>壁厚(mm)</label><input type="number" value="${p.wallThk}" onchange="updatePitProp(${p.id},'wallThk',+this.value)"></div>
+        <div class="prop-group"><label>膜厚(mm)</label><input type="number" value="${p.membraneThk}" onchange="updatePitProp(${p.id},'membraneThk',+this.value)"></div>
+      </div>`;
+      html += `<div class="prop-row">
+        <div class="prop-group"><label>坑底厚(mm)</label><input type="number" value="${p.bottomThk}" onchange="updatePitProp(${p.id},'bottomThk',+this.value)"></div>
+        <div class="prop-group"><label>底膜厚(mm)</label><input type="number" value="${p.bottomMembraneThk}" onchange="updatePitProp(${p.id},'bottomMembraneThk',+this.value)"></div>
+      </div>`;
+      html += `</div>`;
+    }
+
+    html += `</div>`;
+  }
+  list.innerHTML = html;
+  content.innerHTML = '';
+}
+
+window.updatePitProp = function(id, prop, value) {
+  const pit = state.pits.find(p => p.id === id);
+  if (pit) { pit[prop] = value; pit.depth = pit.topElev - pit.bottomElev; render(); updatePropsPanel(); }
+};
+
+window.selectPit = function(id) {
+  state.selectedPitId = state.selectedPitId === id ? null : id;
+  updatePropsPanel();
+  render();
+};
+
+window.deletePit = function(id) {
+  state.pits = state.pits.filter(p => p.id !== id);
+  if (state.selectedPitId === id) state.selectedPitId = null;
+  updatePropsPanel();
+  render();
+};
+
+// ============ 步骤切换 ============
+window.switchStep = function(step) {
+  if (step === 2 && state.pits.length === 0) { alert('请先在平面布局中添加坑体'); return; }
+  if (step === 3 && state.pits.length === 0) { alert('请先在平面布局中添加坑体'); return; }
+
+  state.currentStep = step;
+  document.querySelectorAll('.step-tab').forEach(t => {
+    const s = +t.dataset.step;
+    t.classList.toggle('active', s === step);
+    t.classList.toggle('completed', s < step);
+  });
+  document.getElementById('step1Area').style.display = step === 1 ? 'flex' : 'none';
+  document.getElementById('step2Area').style.display = step === 2 ? 'flex' : 'none';
+  document.getElementById('step3Area').style.display = step === 3 ? 'flex' : 'none';
+
+  if (step === 2) initThreeView();
+  if (step === 3) initSectionView();
+};
+
+// ============ Three.js 3D视图 ============
+let threeScene, threeCamera, threeRenderer, threeControls;
+
+function initThreeView() {
+  const container = document.getElementById('threeContainer');
+  if (threeRenderer) {
+    container.appendChild(threeRenderer.domElement);
+    threeRenderer.setSize(container.clientWidth, container.clientHeight);
+    buildThreeScene();
+    return;
+  }
+
+  threeScene = new THREE.Scene();
+  threeScene.background = new THREE.Color(0x0f0f23);
+  threeCamera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 1000000);
+  threeCamera.position.set(400, 300, 600);
+  threeRenderer = new THREE.WebGLRenderer({ antialias: true });
+  threeRenderer.setSize(container.clientWidth, container.clientHeight);
+  container.appendChild(threeRenderer.domElement);
+  threeControls = new OrbitControls(threeCamera, threeRenderer.domElement);
+  threeControls.target.set(0, -100, 0);
+  threeControls.update();
+
+  const light1 = new THREE.DirectionalLight(0xffffff, 1);
+  light1.position.set(200, 400, 300);
+  threeScene.add(light1);
+  const light2 = new THREE.AmbientLight(0x404040, 2);
+  threeScene.add(light2);
+
+  buildThreeScene();
+  animateThree();
+}
+
+function getSlabBounds() {
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const p of state.pits) {
+    const b = getPitBounds(p);
+    const ext = p.wallThk + p.membraneThk;
+    minX = Math.min(minX, b.left - ext); minZ = Math.min(minZ, b.top - ext);
+    maxX = Math.max(maxX, b.right + ext); maxZ = Math.max(maxZ, b.bottom + ext);
+  }
+  const margin = state.slabThickness;
+  minX -= margin; minZ -= margin; maxX += margin; maxZ += margin;
+  return { minX, minZ, maxX, maxZ, slabW: maxX - minX, slabD: maxZ - minZ, slabCx: (minX + maxX) / 2, slabCz: (minZ + maxZ) / 2 };
+}
+
+const CLIPPER_SCALE = 1000;
+
+function pitToClipperPath(pit) {
+  const pts = [];
+  if (pit.type === 'rect') {
+    const hw = pit.width / 2, hh = pit.height / 2;
+    pts.push({ X: Math.round((pit.cx - hw) * CLIPPER_SCALE), Y: Math.round((pit.cy - hh) * CLIPPER_SCALE) });
+    pts.push({ X: Math.round((pit.cx + hw) * CLIPPER_SCALE), Y: Math.round((pit.cy - hh) * CLIPPER_SCALE) });
+    pts.push({ X: Math.round((pit.cx + hw) * CLIPPER_SCALE), Y: Math.round((pit.cy + hh) * CLIPPER_SCALE) });
+    pts.push({ X: Math.round((pit.cx - hw) * CLIPPER_SCALE), Y: Math.round((pit.cy + hh) * CLIPPER_SCALE) });
+  } else {
+    const r = pit.diameter / 2;
+    const seg = 48;
+    for (let i = 0; i < seg; i++) {
+      const a = (i / seg) * Math.PI * 2;
+      pts.push({ X: Math.round((pit.cx + Math.cos(a) * r) * CLIPPER_SCALE), Y: Math.round((pit.cy + Math.sin(a) * r) * CLIPPER_SCALE) });
+    }
+  }
+  return pts;
+}
+
+function clipperUnion(pathsArr) {
+  if (pathsArr.length === 0) return [];
+  const co = new ClipperLib.Clipper();
+  for (const p of pathsArr) co.AddPath(p, ClipperLib.PolyType.ptSubject, true);
+  const solution = new ClipperLib.Paths();
+  co.Execute(ClipperLib.ClipType.ctUnion, solution, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  return solution;
+}
+
+function clipperOffset(paths, delta) {
+  const co = new ClipperLib.ClipperOffset();
+  for (const p of paths) co.AddPath(p, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+  const solution = new ClipperLib.Paths();
+  co.Execute(solution, delta * CLIPPER_SCALE);
+  return solution;
+}
+
+function clipperDifference(subjectPaths, clipPaths) {
+  const co = new ClipperLib.Clipper();
+  for (const p of subjectPaths) co.AddPath(p, ClipperLib.PolyType.ptSubject, true);
+  for (const p of clipPaths) co.AddPath(p, ClipperLib.PolyType.ptClip, true);
+  const solution = new ClipperLib.Paths();
+  co.Execute(ClipperLib.ClipType.ctDifference, solution, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  return solution;
+}
+
+function clipperPathsToShape(paths) {
+  const shapes = [];
+  for (const path of paths) {
+    if (path.length < 3) continue;
+    const shape = new THREE.Shape();
+    shape.moveTo(path[0].X / CLIPPER_SCALE, path[0].Y / CLIPPER_SCALE);
+    for (let i = 1; i < path.length; i++) {
+      shape.lineTo(path[i].X / CLIPPER_SCALE, path[i].Y / CLIPPER_SCALE);
+    }
+    shape.lineTo(path[0].X / CLIPPER_SCALE, path[0].Y / CLIPPER_SCALE);
+    shapes.push(shape);
+  }
+  return shapes;
+}
+
+function shapeWithHolesToGeo(outerShape, holePaths, depth) {
+  const s = new THREE.Shape();
+  const outerPts = outerShape.getPoints();
+  s.moveTo(outerPts[0].x, outerPts[0].y);
+  for (let i = 1; i < outerPts.length; i++) s.lineTo(outerPts[i].x, outerPts[i].y);
+  s.lineTo(outerPts[0].x, outerPts[0].y);
+
+  for (const hp of holePaths) {
+    if (hp.length < 3) continue;
+    const hole = new THREE.Path();
+    hole.moveTo(hp[0].X / CLIPPER_SCALE, hp[0].Y / CLIPPER_SCALE);
+    for (let i = 1; i < hp.length; i++) hole.lineTo(hp[i].X / CLIPPER_SCALE, hp[i].Y / CLIPPER_SCALE);
+    hole.lineTo(hp[0].X / CLIPPER_SCALE, hp[0].Y / CLIPPER_SCALE);
+    s.holes.push(hole);
+  }
+
+  const geo = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false });
+  geo.rotateX(-Math.PI / 2);
+  return geo;
+}
+
+function clipperIntersects(pathsA, pathsB) {
+  const co = new ClipperLib.Clipper();
+  for (const p of pathsA) co.AddPath(p, ClipperLib.PolyType.ptSubject, true);
+  for (const p of pathsB) co.AddPath(p, ClipperLib.PolyType.ptClip, true);
+  const solution = new ClipperLib.Paths();
+  co.Execute(ClipperLib.ClipType.ctIntersection, solution, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  return solution.length > 0;
+}
+
+function groupPitsByConnection(pits) {
+  const groups = [];
+  const visited = new Set();
+  const concreteOutlines = pits.map(p => clipperOffset([pitToClipperPath(p)], p.wallThk));
+  for (let i = 0; i < pits.length; i++) {
+    if (visited.has(i)) continue;
+    const group = [i];
+    visited.add(i);
+    const queue = [i];
+    while (queue.length > 0) {
+      const ci = queue.shift();
+      for (let j = 0; j < pits.length; j++) {
+        if (visited.has(j)) continue;
+        if (clipperIntersects(concreteOutlines[ci], concreteOutlines[j])) {
+          group.push(j);
+          visited.add(j);
+          queue.push(j);
+        }
+      }
+    }
+    groups.push(group.map(idx => pits[idx]));
+  }
+  return groups;
+}
+
+function buildThreeScene() {
+  while (threeScene.children.length > 2) threeScene.remove(threeScene.children[2]);
+
+  const slabThk = state.slabThickness;
+  const slabMemThk = state.slabMembraneThk;
+  const sb = getSlabBounds();
+
+  const CONCRETE_COLOR = 0x4a8fe7;
+  const MEMBRANE_COLOR = 0xffc107;
+  const CAVITY_COLOR = 0x0f0f23;
+
+  const membraneGeos = [];
+  const concreteGeos = [];
+  const cavityGeos = [];
+
+  if (state.pits.length === 0) {
+    const slabGeo = new THREE.BoxGeometry(sb.slabW, slabThk, sb.slabD);
+    slabGeo.translate(sb.slabCx, -slabThk / 2, sb.slabCz);
+    concreteGeos.push(slabGeo);
+
+    const slabMemGeo = new THREE.BoxGeometry(sb.slabW, slabMemThk, sb.slabD);
+    slabMemGeo.translate(sb.slabCx, -slabThk - slabMemThk / 2, sb.slabCz);
+    membraneGeos.push(slabMemGeo);
+  } else {
+    for (const pit of state.pits) {
+      const cavityPath = [pitToClipperPath(pit)];
+      const concreteOutline = clipperOffset(cavityPath, pit.wallThk);
+      const membraneOutline = clipperOffset(concreteOutline, pit.membraneThk);
+      const membraneInner = clipperOffset(concreteOutline, -1);
+      const depthMm = Math.abs(pit.topElev - pit.bottomElev) * 1000;
+      const pitDepth = depthMm - slabThk;
+
+      for (const shape of clipperPathsToShape(cavityPath)) {
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: depthMm, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -depthMm, 0);
+        cavityGeos.push(geo);
+      }
+
+      const concreteShell = clipperDifference(concreteOutline, cavityPath);
+      for (const shape of clipperPathsToShape(concreteShell)) {
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: pitDepth, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -slabThk - pitDepth, 0);
+        concreteGeos.push(geo);
+      }
+
+      for (const cp of concreteOutline) {
+        const shape = clipperPathsToShape([cp])[0];
+        if (!shape) continue;
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: pit.bottomThk, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -depthMm - pit.bottomThk, 0);
+        concreteGeos.push(geo);
+      }
+
+      const membraneShell = clipperDifference(membraneOutline, membraneInner);
+      for (const shape of clipperPathsToShape(membraneShell)) {
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: pitDepth + pit.bottomThk, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -slabThk - pitDepth - pit.bottomThk, 0);
+        membraneGeos.push(geo);
+      }
+
+      for (const mp of membraneOutline) {
+        const shape = clipperPathsToShape([mp])[0];
+        if (!shape) continue;
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: pit.bottomMembraneThk, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -depthMm - pit.bottomThk - pit.bottomMembraneThk, 0);
+        membraneGeos.push(geo);
+      }
+    }
+
+    const allCavityPaths = clipperUnion(state.pits.map(p => pitToClipperPath(p)));
+    const allConcreteRaw = [];
+    const allMembraneRaw = [];
+    for (const p of state.pits) {
+      for (const cp of clipperOffset([pitToClipperPath(p)], p.wallThk)) allConcreteRaw.push(cp);
+      for (const mp of clipperOffset(clipperOffset([pitToClipperPath(p)], p.wallThk), p.membraneThk)) allMembraneRaw.push(mp);
+    }
+    const allConcretePaths = clipperUnion(allConcreteRaw);
+    const allMembranePaths = clipperUnion(allMembraneRaw);
+    const allMembraneInner = clipperOffset(allConcretePaths, -1);
+
+    const slabShape = new THREE.Shape();
+    slabShape.moveTo(sb.minX, sb.minZ);
+    slabShape.lineTo(sb.maxX, sb.minZ);
+    slabShape.lineTo(sb.maxX, sb.maxZ);
+    slabShape.lineTo(sb.minX, sb.maxZ);
+    slabShape.lineTo(sb.minX, sb.minZ);
+
+    for (const cp of allCavityPaths) {
+      if (cp.length < 3) continue;
+      const hole = new THREE.Path();
+      hole.moveTo(cp[0].X / CLIPPER_SCALE, cp[0].Y / CLIPPER_SCALE);
+      for (let i = 1; i < cp.length; i++) hole.lineTo(cp[i].X / CLIPPER_SCALE, cp[i].Y / CLIPPER_SCALE);
+      hole.lineTo(cp[0].X / CLIPPER_SCALE, cp[0].Y / CLIPPER_SCALE);
+      slabShape.holes.push(hole);
+    }
+
+    const slabGeo = new THREE.ExtrudeGeometry(slabShape, { depth: slabThk, bevelEnabled: false });
+    slabGeo.rotateX(-Math.PI / 2);
+    slabGeo.translate(0, -slabThk, 0);
+    concreteGeos.push(slabGeo);
+
+    const slabMemShape = new THREE.Shape();
+    slabMemShape.moveTo(sb.minX, sb.minZ);
+    slabMemShape.lineTo(sb.maxX, sb.minZ);
+    slabMemShape.lineTo(sb.maxX, sb.maxZ);
+    slabMemShape.lineTo(sb.minX, sb.maxZ);
+    slabMemShape.lineTo(sb.minX, sb.minZ);
+
+    for (const cp of allMembraneInner) {
+      if (cp.length < 3) continue;
+      const hole = new THREE.Path();
+      hole.moveTo(cp[0].X / CLIPPER_SCALE, cp[0].Y / CLIPPER_SCALE);
+      for (let i = 1; i < cp.length; i++) hole.lineTo(cp[i].X / CLIPPER_SCALE, cp[i].Y / CLIPPER_SCALE);
+      hole.lineTo(cp[0].X / CLIPPER_SCALE, cp[0].Y / CLIPPER_SCALE);
+      slabMemShape.holes.push(hole);
+    }
+
+    const slabMemGeo = new THREE.ExtrudeGeometry(slabMemShape, { depth: slabMemThk, bevelEnabled: false });
+    slabMemGeo.rotateX(-Math.PI / 2);
+    slabMemGeo.translate(0, -slabThk - slabMemThk, 0);
+    membraneGeos.push(slabMemGeo);
+  }
+
+  const membraneMat = new THREE.MeshPhongMaterial({ color: MEMBRANE_COLOR, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false });
+  const concreteMat = new THREE.MeshPhongMaterial({ color: CONCRETE_COLOR, transparent: true, opacity: 1.0, side: THREE.DoubleSide, depthWrite: true });
+  const cavityMat = new THREE.MeshPhongMaterial({ color: CAVITY_COLOR, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+
+  if (membraneGeos.length > 0) {
+    const merged = mergeGeometries(membraneGeos);
+    if (merged) {
+      const mesh = new THREE.Mesh(merged, membraneMat);
+      mesh.renderOrder = 0;
+      threeScene.add(mesh);
+    }
+  }
+
+  if (concreteGeos.length > 0) {
+    const merged = mergeGeometries(concreteGeos);
+    if (merged) {
+      const mesh = new THREE.Mesh(merged, concreteMat);
+      mesh.renderOrder = 1;
+      threeScene.add(mesh);
+    }
+  }
+
+  if (cavityGeos.length > 0) {
+    const merged = mergeGeometries(cavityGeos);
+    if (merged) {
+      const mesh = new THREE.Mesh(merged, cavityMat);
+      mesh.renderOrder = 2;
+      threeScene.add(mesh);
+    }
+  }
+
+  let maxDepth3d = 0;
+  for (const pit of state.pits) {
+    const depth3d = Math.abs(pit.topElev - pit.bottomElev) * 1000;
+    maxDepth3d = Math.max(maxDepth3d, depth3d + pit.bottomThk + pit.bottomMembraneThk);
+  }
+  maxDepth3d = Math.max(maxDepth3d, slabThk + slabMemThk);
+
+  const sceneBox = new THREE.Box3();
+  for (let i = 2; i < threeScene.children.length; i++) sceneBox.expandByObject(threeScene.children[i]);
+  const sceneCenter = new THREE.Vector3();
+  sceneBox.getCenter(sceneCenter);
+  const sceneSize = new THREE.Vector3();
+  sceneBox.getSize(sceneSize);
+  const maxDim = Math.max(sceneSize.x, sceneSize.y, sceneSize.z);
+  const dist = maxDim * 1.8;
+  threeControls.target.copy(sceneCenter);
+  threeCamera.position.set(sceneCenter.x + dist * 0.6, sceneCenter.y + dist * 0.5, sceneCenter.z + dist * 0.8);
+  threeControls.update();
+
+  updateThreePropsPanel();
+}
+
+function updateThreePropsPanel() {
+  const content = document.getElementById('threePropsContent');
+  let html = '';
+  html += `<div style="background:#0f3460;border-radius:4px;padding:8px;margin-bottom:8px;">
+    <div style="font-size:12px;color:#4a8fe7;margin-bottom:6px;">底板参数</div>
+    <div class="prop-row" style="margin-bottom:4px;">
+      <div class="prop-group"><label>底板厚(mm)</label><input type="number" value="${state.slabThickness}" oninput="state.slabThickness=+this.value;buildThreeScene();"></div>
+      <div class="prop-group"><label>底板底膜(mm)</label><input type="number" value="${state.slabMembraneThk}" oninput="state.slabMembraneThk=+this.value;buildThreeScene();"></div>
+    </div>
+  </div>`;
+  for (const pit of state.pits) {
+    html += `<div style="background:#0f3460;border-radius:4px;padding:8px;margin-bottom:8px;">
+      <div style="font-size:12px;color:#e94560;margin-bottom:6px;">${pit.name} #${pit.id}</div>
+      <div class="prop-row" style="margin-bottom:4px;">
+        <div class="prop-group"><label>壁厚(mm)</label><input type="number" value="${pit.wallThk}" oninput="updatePitProp(${pit.id},'wallThk',+this.value);buildThreeScene();"></div>
+        <div class="prop-group"><label>膜厚(mm)</label><input type="number" value="${pit.membraneThk}" oninput="updatePitProp(${pit.id},'membraneThk',+this.value);buildThreeScene();"></div>
+      </div>
+      <div class="prop-row">
+        <div class="prop-group"><label>坑底厚(mm)</label><input type="number" value="${pit.bottomThk}" oninput="updatePitProp(${pit.id},'bottomThk',+this.value);buildThreeScene();"></div>
+        <div class="prop-group"><label>底膜厚(mm)</label><input type="number" value="${pit.bottomMembraneThk}" oninput="updatePitProp(${pit.id},'bottomMembraneThk',+this.value);buildThreeScene();"></div>
+      </div>
+    </div>`;
+  }
+  html += `<div style="font-size:11px;margin-top:12px;padding:8px;background:#0a0a1e;border-radius:4px;">
+    <div style="color:#888;margin-bottom:6px;">颜色图例</div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><span style="display:inline-block;width:12px;height:12px;background:#4a8fe7;border-radius:2px;"></span> 混凝土（底板/坑壁/坑底）</div>
+    <div style="display:flex;align-items:center;gap:6px;"><span style="display:inline-block;width:12px;height:12px;background:#ffc107;border-radius:2px;"></span> 膜（底板底膜/外膜/坑底膜）</div>
+  </div>`;
+  content.innerHTML = html;
+}
+
+window.buildThreeScene = buildThreeScene;
+
+function animateThree() {
+  requestAnimationFrame(animateThree);
+  if (threeRenderer && threeScene && threeCamera) {
+    threeControls && threeControls.update();
+    threeRenderer.render(threeScene, threeCamera);
+  }
+}
+
+function resizeThree() {
+  if (!threeRenderer) return;
+  const container = document.getElementById('threeContainer');
+  if (container.clientWidth === 0) return;
+  threeRenderer.setSize(container.clientWidth, container.clientHeight);
+  threeCamera.aspect = container.clientWidth / container.clientHeight;
+  threeCamera.updateProjectionMatrix();
+
+  if (sectionRenderer) {
+    const sc = document.getElementById('section3DContainer');
+    if (sc && sc.clientWidth > 0) {
+      sectionRenderer.setSize(sc.clientWidth, sc.clientHeight);
+      sectionCamera.aspect = sc.clientWidth / sc.clientHeight;
+      sectionCamera.updateProjectionMatrix();
+    }
+  }
+}
+
+// ============ Step 3: 剖面视图 ============
+let sectionScene, sectionCamera, sectionRenderer, sectionControls;
+let sectionLineMesh = null;
+
+function initSectionView() {
+  const container = document.getElementById('section3DContainer');
+  if (sectionRenderer) {
+    container.appendChild(sectionRenderer.domElement);
+    sectionRenderer.setSize(container.clientWidth, container.clientHeight);
+    buildSectionScene();
+    return;
+  }
+
+  sectionScene = new THREE.Scene();
+  sectionScene.background = new THREE.Color(0x0f0f23);
+  sectionCamera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 1000000);
+  sectionCamera.position.set(0, 500, 800);
+  sectionRenderer = new THREE.WebGLRenderer({ antialias: true });
+  sectionRenderer.setSize(container.clientWidth, container.clientHeight);
+  container.appendChild(sectionRenderer.domElement);
+  sectionControls = new OrbitControls(sectionCamera, sectionRenderer.domElement);
+  sectionControls.target.set(0, -100, 0);
+  sectionControls.update();
+
+  const light1 = new THREE.DirectionalLight(0xffffff, 1);
+  light1.position.set(200, 400, 300);
+  sectionScene.add(light1);
+  const light2 = new THREE.AmbientLight(0x404040, 2);
+  sectionScene.add(light2);
+
+  buildSectionScene();
+  animateSection();
+
+  setupSectionInteraction(container);
+}
+
+function buildSectionScene() {
+  while (sectionScene.children.length > 2) sectionScene.remove(sectionScene.children[2]);
+  if (sectionLineMesh) { sectionScene.remove(sectionLineMesh); sectionLineMesh = null; }
+
+  const slabThk = state.slabThickness;
+  const slabMemThk = state.slabMembraneThk;
+  const sb = getSlabBounds();
+
+  const CONCRETE_COLOR = 0x4a8fe7;
+  const MEMBRANE_COLOR = 0xffc107;
+  const CAVITY_COLOR = 0x0f0f23;
+
+  const membraneGeos = [];
+  const concreteGeos = [];
+  const cavityGeos = [];
+
+  if (state.pits.length === 0) {
+    const slabGeo = new THREE.BoxGeometry(sb.slabW, slabThk, sb.slabD);
+    slabGeo.translate(sb.slabCx, -slabThk / 2, sb.slabCz);
+    concreteGeos.push(slabGeo);
+
+    const slabMemGeo = new THREE.BoxGeometry(sb.slabW, slabMemThk, sb.slabD);
+    slabMemGeo.translate(sb.slabCx, -slabThk - slabMemThk / 2, sb.slabCz);
+    membraneGeos.push(slabMemGeo);
+  } else {
+    for (const pit of state.pits) {
+      const cavityPath = [pitToClipperPath(pit)];
+      const concreteOutline = clipperOffset(cavityPath, pit.wallThk);
+      const membraneOutline = clipperOffset(concreteOutline, pit.membraneThk);
+      const membraneInner = clipperOffset(concreteOutline, -1);
+      const depthMm = Math.abs(pit.topElev - pit.bottomElev) * 1000;
+      const pitDepth = depthMm - slabThk;
+
+      for (const shape of clipperPathsToShape(cavityPath)) {
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: depthMm, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -depthMm, 0);
+        cavityGeos.push(geo);
+      }
+
+      const concreteShell = clipperDifference(concreteOutline, cavityPath);
+      for (const shape of clipperPathsToShape(concreteShell)) {
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: pitDepth, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -slabThk - pitDepth, 0);
+        concreteGeos.push(geo);
+      }
+
+      for (const cp of concreteOutline) {
+        const shape = clipperPathsToShape([cp])[0];
+        if (!shape) continue;
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: pit.bottomThk, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -depthMm - pit.bottomThk, 0);
+        concreteGeos.push(geo);
+      }
+
+      const membraneShell = clipperDifference(membraneOutline, membraneInner);
+      for (const shape of clipperPathsToShape(membraneShell)) {
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: pitDepth + pit.bottomThk, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -slabThk - pitDepth - pit.bottomThk, 0);
+        membraneGeos.push(geo);
+      }
+
+      for (const mp of membraneOutline) {
+        const shape = clipperPathsToShape([mp])[0];
+        if (!shape) continue;
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: pit.bottomMembraneThk, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, -depthMm - pit.bottomThk - pit.bottomMembraneThk, 0);
+        membraneGeos.push(geo);
+      }
+    }
+
+    const allCavityPaths = clipperUnion(state.pits.map(p => pitToClipperPath(p)));
+    const allConcreteRaw = [];
+    const allMembraneRaw = [];
+    for (const p of state.pits) {
+      for (const cp of clipperOffset([pitToClipperPath(p)], p.wallThk)) allConcreteRaw.push(cp);
+      for (const mp of clipperOffset(clipperOffset([pitToClipperPath(p)], p.wallThk), p.membraneThk)) allMembraneRaw.push(mp);
+    }
+    const allConcretePaths = clipperUnion(allConcreteRaw);
+    const allMembranePaths = clipperUnion(allMembraneRaw);
+    const allMembraneInner = clipperOffset(allConcretePaths, -1);
+
+    const slabShape = new THREE.Shape();
+    slabShape.moveTo(sb.minX, sb.minZ);
+    slabShape.lineTo(sb.maxX, sb.minZ);
+    slabShape.lineTo(sb.maxX, sb.maxZ);
+    slabShape.lineTo(sb.minX, sb.maxZ);
+    slabShape.lineTo(sb.minX, sb.minZ);
+
+    for (const cp of allCavityPaths) {
+      if (cp.length < 3) continue;
+      const hole = new THREE.Path();
+      hole.moveTo(cp[0].X / CLIPPER_SCALE, cp[0].Y / CLIPPER_SCALE);
+      for (let i = 1; i < cp.length; i++) hole.lineTo(cp[i].X / CLIPPER_SCALE, cp[i].Y / CLIPPER_SCALE);
+      hole.lineTo(cp[0].X / CLIPPER_SCALE, cp[0].Y / CLIPPER_SCALE);
+      slabShape.holes.push(hole);
+    }
+
+    const slabGeo = new THREE.ExtrudeGeometry(slabShape, { depth: slabThk, bevelEnabled: false });
+    slabGeo.rotateX(-Math.PI / 2);
+    slabGeo.translate(0, -slabThk, 0);
+    concreteGeos.push(slabGeo);
+
+    const slabMemShape = new THREE.Shape();
+    slabMemShape.moveTo(sb.minX, sb.minZ);
+    slabMemShape.lineTo(sb.maxX, sb.minZ);
+    slabMemShape.lineTo(sb.maxX, sb.maxZ);
+    slabMemShape.lineTo(sb.minX, sb.maxZ);
+    slabMemShape.lineTo(sb.minX, sb.minZ);
+
+    for (const cp of allMembraneInner) {
+      if (cp.length < 3) continue;
+      const hole = new THREE.Path();
+      hole.moveTo(cp[0].X / CLIPPER_SCALE, cp[0].Y / CLIPPER_SCALE);
+      for (let i = 1; i < cp.length; i++) hole.lineTo(cp[i].X / CLIPPER_SCALE, cp[i].Y / CLIPPER_SCALE);
+      hole.lineTo(cp[0].X / CLIPPER_SCALE, cp[0].Y / CLIPPER_SCALE);
+      slabMemShape.holes.push(hole);
+    }
+
+    const slabMemGeo = new THREE.ExtrudeGeometry(slabMemShape, { depth: slabMemThk, bevelEnabled: false });
+    slabMemGeo.rotateX(-Math.PI / 2);
+    slabMemGeo.translate(0, -slabThk - slabMemThk, 0);
+    membraneGeos.push(slabMemGeo);
+  }
+
+  const membraneMat = new THREE.MeshPhongMaterial({ color: MEMBRANE_COLOR, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false });
+  const concreteMat = new THREE.MeshPhongMaterial({ color: CONCRETE_COLOR, transparent: true, opacity: 1.0, side: THREE.DoubleSide, depthWrite: true });
+  const cavityMat = new THREE.MeshPhongMaterial({ color: CAVITY_COLOR, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+
+  if (membraneGeos.length > 0) {
+    const merged = mergeGeometries(membraneGeos);
+    if (merged) {
+      const mesh = new THREE.Mesh(merged, membraneMat);
+      mesh.renderOrder = 0;
+      sectionScene.add(mesh);
+    }
+  }
+
+  if (concreteGeos.length > 0) {
+    const merged = mergeGeometries(concreteGeos);
+    if (merged) {
+      const mesh = new THREE.Mesh(merged, concreteMat);
+      mesh.renderOrder = 1;
+      sectionScene.add(mesh);
+    }
+  }
+
+  if (cavityGeos.length > 0) {
+    const merged = mergeGeometries(cavityGeos);
+    if (merged) {
+      const mesh = new THREE.Mesh(merged, cavityMat);
+      mesh.renderOrder = 2;
+      sectionScene.add(mesh);
+    }
+  }
+
+  let maxDepth3d = 0;
+  for (const pit of state.pits) {
+    const depth3d = Math.abs(pit.topElev - pit.bottomElev) * 1000;
+    maxDepth3d = Math.max(maxDepth3d, depth3d + pit.bottomThk + pit.bottomMembraneThk);
+  }
+  maxDepth3d = Math.max(maxDepth3d, slabThk + slabMemThk);
+
+  if (state.sectionLine) {
+    const sl = state.sectionLine;
+    const isHorizontal = Math.abs(sl.z2 - sl.z1) < 1;
+    const planeH = maxDepth3d + 200;
+    const extLen = Math.max(sb.slabW, sb.slabD) * 1.5;
+    const planeGeo = new THREE.PlaneGeometry(extLen, planeH);
+    const planeMat = new THREE.MeshBasicMaterial({ color: 0xffeb3b, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false });
+    const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+    planeMesh.renderOrder = 10;
+    if (isHorizontal) {
+      planeMesh.rotation.y = Math.PI / 2;
+      planeMesh.position.set(sb.slabCx, -planeH / 2, sl.z1);
+    } else {
+      planeMesh.position.set(sl.x1, -planeH / 2, sb.slabCz);
+    }
+    sectionScene.add(planeMesh);
+
+    const lineY = 50;
+    const linePts = isHorizontal
+      ? [new THREE.Vector3(sb.slabCx - extLen / 2, lineY, sl.z1), new THREE.Vector3(sb.slabCx + extLen / 2, lineY, sl.z1)]
+      : [new THREE.Vector3(sl.x1, lineY, sb.slabCz - extLen / 2), new THREE.Vector3(sl.x1, lineY, sb.slabCz + extLen / 2)];
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(linePts);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xffeb3b, linewidth: 2 });
+    const lineMesh = new THREE.Line(lineGeo, lineMat);
+    lineMesh.renderOrder = 11;
+    sectionScene.add(lineMesh);
+  }
+
+  const sBox = new THREE.Box3();
+  for (let i = 2; i < sectionScene.children.length; i++) sBox.expandByObject(sectionScene.children[i]);
+  const sCenter = new THREE.Vector3();
+  sBox.getCenter(sCenter);
+  const sSize = new THREE.Vector3();
+  sBox.getSize(sSize);
+  const sMaxDim = Math.max(sSize.x, sSize.y, sSize.z);
+  const sDist = sMaxDim * 1.8;
+  sectionControls.target.copy(sCenter);
+  sectionCamera.position.set(sCenter.x + sDist * 0.6, sCenter.y + sDist * 0.5, sCenter.z + sDist * 0.8);
+  sectionControls.update();
+
+  drawPlanWithDimensions();
+  drawSectionPlaceholder();
+}
+
+function setupSectionInteraction(container) {
+  let dragging = false;
+  let startPt = null;
+
+  const raycaster = new THREE.Raycaster();
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+  container.addEventListener('mousedown', (e) => {
+    if (!state.sectionDrawMode) return;
+    dragging = true;
+    const rect = sectionRenderer.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    raycaster.setFromCamera(mouse, sectionCamera);
+    const pt = new THREE.Vector3();
+    raycaster.ray.intersectPlane(plane, pt);
+    startPt = pt;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+
+  container.addEventListener('mousemove', (e) => {
+    if (!dragging || !startPt) return;
+    e.stopPropagation();
+    const rect = sectionRenderer.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    raycaster.setFromCamera(mouse, sectionCamera);
+    const pt = new THREE.Vector3();
+    raycaster.ray.intersectPlane(plane, pt);
+    if (!pt) return;
+
+    let endX = pt.x, endZ = pt.z;
+    const dx = endX - startPt.x;
+    const dz = endZ - startPt.z;
+    if (Math.abs(dx) > Math.abs(dz)) {
+      endZ = startPt.z;
+    } else {
+      endX = startPt.x;
+    }
+
+    if (sectionLineMesh) sectionScene.remove(sectionLineMesh);
+    const p1 = new THREE.Vector3(startPt.x, 200, startPt.z);
+    const p2 = new THREE.Vector3(endX, 200, endZ);
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xffeb3b, linewidth: 2 });
+    sectionLineMesh = new THREE.Line(lineGeo, lineMat);
+    sectionScene.add(sectionLineMesh);
+
+    state.sectionLine = { x1: startPt.x, z1: startPt.z, x2: endX, z2: endZ };
+    const dir = Math.abs(dx) > Math.abs(dz) ? '横向' : '竖向';
+    document.getElementById('sectionLineInfo').textContent =
+      `${dir}剖面线: (${Math.round(startPt.x)}, ${Math.round(startPt.z)}) → (${Math.round(endX)}, ${Math.round(endZ)})  [松开鼠标生成剖面]`;
+  }, true);
+
+  container.addEventListener('mouseup', (e) => {
+    if (dragging && state.sectionLine) {
+      e.stopPropagation();
+      dragging = false;
+      startPt = null;
+      state.sectionDrawMode = false;
+      sectionControls.enabled = true;
+      sectionCamera.up.set(0, 1, 0);
+      const sb = getSlabBounds();
+      const slabThk = state.slabThickness;
+      let maxDepth = 0;
+      for (const p of state.pits) maxDepth = Math.max(maxDepth, Math.abs(p.topElev - p.bottomElev) * 1000 + p.bottomThk + p.bottomMembraneThk);
+      maxDepth = Math.max(maxDepth, slabThk + state.slabMembraneThk);
+      const rBox = new THREE.Box3();
+      for (let i = 2; i < sectionScene.children.length; i++) rBox.expandByObject(sectionScene.children[i]);
+      const rCenter = new THREE.Vector3();
+      rBox.getCenter(rCenter);
+      const rSize = new THREE.Vector3();
+      rBox.getSize(rSize);
+      const sDist = Math.max(rSize.x, rSize.y, rSize.z) * 1.8;
+      sectionCamera.position.set(rCenter.x + sDist * 0.6, rCenter.y + sDist * 0.5, rCenter.z + sDist * 0.8);
+      sectionControls.target.copy(rCenter);
+      sectionControls.update();
+      const btn = document.getElementById('sectionDrawBtn');
+      btn.textContent = '画剖面线';
+      btn.style.background = '';
+      btn.style.color = '';
+      sectionRenderer.domElement.style.cursor = 'default';
+      document.getElementById('sectionLineInfo').textContent = '点击"画剖面线"按钮，然后在俯视图上拖拽绘制';
+      generateSectionDrawing();
+    }
+    dragging = false;
+  }, true);
+}
+
+window.toggleSectionDrawMode = function() {
+  state.sectionDrawMode = !state.sectionDrawMode;
+  const btn = document.getElementById('sectionDrawBtn');
+  if (state.sectionDrawMode) {
+    btn.textContent = '取消画线';
+    btn.style.background = '#e94560';
+    btn.style.color = '#fff';
+    sectionRenderer.domElement.style.cursor = 'crosshair';
+    sectionControls.enabled = false;
+    const sb = getSlabBounds();
+    const viewRange = Math.max(sb.slabW, sb.slabD);
+    const camHeight = viewRange * 1.2;
+    const dBox = new THREE.Box3();
+    for (let i = 2; i < sectionScene.children.length; i++) dBox.expandByObject(sectionScene.children[i]);
+    const dCenter = new THREE.Vector3();
+    dBox.getCenter(dCenter);
+    sectionCamera.position.set(dCenter.x, camHeight, dCenter.z + 1);
+    sectionCamera.up.set(0, 0, -1);
+    sectionControls.target.set(dCenter.x, dCenter.y, dCenter.z);
+    sectionCamera.lookAt(dCenter.x, dCenter.y, dCenter.z);
+    sectionCamera.updateProjectionMatrix();
+    sectionControls.update();
+    document.getElementById('sectionLineInfo').textContent = '在俯视图上拖拽绘制剖面线（自动吸附横/竖方向）';
+  } else {
+    btn.textContent = '画剖面线';
+    btn.style.background = '';
+    btn.style.color = '';
+    sectionRenderer.domElement.style.cursor = 'default';
+    sectionControls.enabled = true;
+    sectionCamera.up.set(0, 1, 0);
+    const sb = getSlabBounds();
+    const slabThk = state.slabThickness;
+    let maxDepth = 0;
+    for (const p of state.pits) maxDepth = Math.max(maxDepth, Math.abs(p.topElev - p.bottomElev) * 1000 + p.bottomThk + p.bottomMembraneThk);
+    maxDepth = Math.max(maxDepth, slabThk + state.slabMembraneThk);
+    const rBox2 = new THREE.Box3();
+    for (let i = 2; i < sectionScene.children.length; i++) rBox2.expandByObject(sectionScene.children[i]);
+    const rCenter2 = new THREE.Vector3();
+    rBox2.getCenter(rCenter2);
+    const rSize2 = new THREE.Vector3();
+    rBox2.getSize(rSize2);
+    const sDist = Math.max(rSize2.x, rSize2.y, rSize2.z) * 1.8;
+    sectionCamera.position.set(rCenter2.x + sDist * 0.6, rCenter2.y + sDist * 0.5, rCenter2.z + sDist * 0.8);
+    sectionControls.target.copy(rCenter2);
+    sectionControls.update();
+    document.getElementById('sectionLineInfo').textContent = '点击"画剖面线"按钮，然后在俯视图上拖拽绘制';
+  }
+};
+
+function animateSection() {
+  requestAnimationFrame(animateSection);
+  if (sectionRenderer && sectionScene && sectionCamera) {
+    sectionControls && sectionControls.update();
+    sectionRenderer.render(sectionScene, sectionCamera);
+  }
+}
+
+// ============ 平面图带标注 ============
+function drawPlanWithDimensions() {
+  const pc = document.getElementById('planCanvas');
+  const pctx = pc.getContext('2d');
+  const pw = pc.parentElement.clientWidth - 16;
+  const ph = pc.parentElement.clientHeight - 40;
+  pc.width = pw * devicePixelRatio;
+  pc.height = ph * devicePixelRatio;
+  pc.style.width = pw + 'px';
+  pc.style.height = ph + 'px';
+  pctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  pctx.fillStyle = '#0f0f23';
+  pctx.fillRect(0, 0, pw, ph);
+
+  if (state.pits.length === 0) return;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of state.pits) {
+    const b = getPitBounds(p);
+    const ext = p.wallThk + p.membraneThk + 50;
+    minX = Math.min(minX, b.left - ext); minY = Math.min(minY, b.top - ext);
+    maxX = Math.max(maxX, b.right + ext); maxY = Math.max(maxY, b.bottom + ext);
+  }
+  const ww = maxX - minX, wh = maxY - minY;
+  const scale = Math.min(pw / ww, ph / wh) * 0.75;
+  const ox = pw / 2 - (minX + maxX) / 2 * scale;
+  const oy = ph / 2 - (minY + maxY) / 2 * scale;
+
+  pctx.strokeStyle = '#4a8fe7';
+  pctx.lineWidth = 2;
+  pctx.strokeRect(ox + minX * scale, oy + minY * scale, ww * scale, wh * scale);
+
+  for (const pit of state.pits) {
+    const sx = ox + pit.cx * scale;
+    const sy = oy + pit.cy * scale;
+
+    if (pit.type === 'rect') {
+      const sw = pit.width * scale, sh = pit.height * scale;
+      pctx.fillStyle = 'rgba(15,52,96,0.5)';
+      pctx.strokeStyle = '#e94560';
+      pctx.lineWidth = 1.5;
+      pctx.fillRect(sx - sw / 2, sy - sh / 2, sw, sh);
+      pctx.strokeRect(sx - sw / 2, sy - sh / 2, sw, sh);
+
+      const wallPx = pit.wallThk * scale;
+      const memPx = pit.membraneThk * scale;
+      pctx.strokeStyle = 'rgba(233,69,96,0.3)';
+      pctx.lineWidth = 0.5;
+      pctx.setLineDash([3, 3]);
+      pctx.strokeRect(sx - (sw / 2 + wallPx), sy - (sh / 2 + wallPx), sw + 2 * wallPx, sh + 2 * wallPx);
+      pctx.strokeRect(sx - (sw / 2 + wallPx + memPx), sy - (sh / 2 + wallPx + memPx), sw + 2 * (wallPx + memPx), sh + 2 * (wallPx + memPx));
+      pctx.setLineDash([]);
+
+      drawDimLine(pctx, sx - sw / 2, sy - sh / 2 - 25, sx + sw / 2, sy - sh / 2 - 25, pit.width + '', '#e94560');
+      drawDimLine(pctx, sx - sw / 2 - 25, sy - sh / 2, sx - sw / 2 - 25, sy + sh / 2, pit.height + '', '#e94560');
+    } else {
+      const sr = pit.diameter / 2 * scale;
+      pctx.fillStyle = 'rgba(15,52,96,0.5)';
+      pctx.strokeStyle = '#e94560';
+      pctx.lineWidth = 1.5;
+      pctx.beginPath(); pctx.arc(sx, sy, sr, 0, Math.PI * 2); pctx.fill(); pctx.stroke();
+
+      pctx.strokeStyle = 'rgba(233,69,96,0.3)';
+      pctx.lineWidth = 0.5;
+      pctx.setLineDash([3, 3]);
+      pctx.beginPath(); pctx.arc(sx, sy, sr + pit.wallThk * scale, 0, Math.PI * 2); pctx.stroke();
+      pctx.beginPath(); pctx.arc(sx, sy, sr + (pit.wallThk + pit.membraneThk) * scale, 0, Math.PI * 2); pctx.stroke();
+      pctx.setLineDash([]);
+
+      pctx.beginPath(); pctx.moveTo(sx, sy); pctx.lineTo(sx + sr, sy); pctx.strokeStyle = '#e94560'; pctx.lineWidth = 1; pctx.stroke();
+      pctx.fillStyle = '#e94560'; pctx.font = '10px Microsoft YaHei'; pctx.textAlign = 'center';
+      pctx.fillText('⌀' + pit.diameter, sx + sr / 2, sy - 8);
+    }
+
+    pctx.fillStyle = '#e94560'; pctx.font = 'bold 11px Microsoft YaHei'; pctx.textAlign = 'center';
+    pctx.fillText(pit.name, sx, sy + 4);
+  }
+
+  if (state.sectionLine) {
+    const sl = state.sectionLine;
+    const x1p = ox + sl.x1 * scale, y1p = oy + sl.z1 * scale;
+    const x2p = ox + sl.x2 * scale, y2p = oy + sl.z2 * scale;
+
+    pctx.strokeStyle = '#ffeb3b';
+    pctx.lineWidth = 2;
+    pctx.setLineDash([6, 4]);
+    pctx.beginPath();
+    pctx.moveTo(x1p, y1p);
+    pctx.lineTo(x2p, y2p);
+    pctx.stroke();
+    pctx.setLineDash([]);
+
+    const dx = x2p - x1p, dy = y2p - y1p;
+    const len = Math.hypot(dx, dy);
+    const nx = dx / len, ny = dy / len;
+    const arrowLen = 10, arrowW = 5;
+
+    pctx.fillStyle = '#ffeb3b';
+    pctx.beginPath();
+    pctx.moveTo(x1p, y1p);
+    pctx.lineTo(x1p + nx * arrowLen - ny * arrowW, y1p + ny * arrowLen + nx * arrowW);
+    pctx.lineTo(x1p + nx * arrowLen + ny * arrowW, y1p + ny * arrowLen - nx * arrowW);
+    pctx.fill();
+
+    pctx.beginPath();
+    pctx.moveTo(x2p, y2p);
+    pctx.lineTo(x2p - nx * arrowLen - ny * arrowW, y2p - ny * arrowLen + nx * arrowW);
+    pctx.lineTo(x2p - nx * arrowLen + ny * arrowW, y2p - ny * arrowLen - nx * arrowW);
+    pctx.fill();
+
+    pctx.font = 'bold 12px Microsoft YaHei';
+    pctx.textAlign = 'center';
+    pctx.textBaseline = 'middle';
+    const perpX = -ny * 16, perpY = nx * 16;
+    pctx.fillText('1', x1p + perpX, y1p + perpY);
+    pctx.fillText('1', x2p + perpX, y2p + perpY);
+
+    const mx = (x1p + x2p) / 2, my = (y1p + y2p) / 2;
+    pctx.font = '11px Microsoft YaHei';
+    pctx.fillText('1-1', mx + perpX, my + perpY);
+  }
+}
+
+function drawDimLine(ctx, x1, y1, x2, y2, label, color) {
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 0.8;
+  ctx.font = '10px Microsoft YaHei';
+  const isH = Math.abs(y1 - y2) < 1;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  const arrowLen = 6;
+  if (isH) {
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 + arrowLen, y1 - arrowLen / 2); ctx.lineTo(x1 + arrowLen, y1 + arrowLen / 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - arrowLen, y2 - arrowLen / 2); ctx.lineTo(x2 - arrowLen, y2 + arrowLen / 2); ctx.fill();
+    ctx.textAlign = 'center';
+    ctx.fillText(label, (x1 + x2) / 2, y1 - 4);
+  } else {
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - arrowLen / 2, y1 + arrowLen); ctx.lineTo(x1 + arrowLen / 2, y1 + arrowLen); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - arrowLen / 2, y2 - arrowLen); ctx.lineTo(x2 + arrowLen / 2, y2 - arrowLen); ctx.fill();
+    ctx.save(); ctx.translate((x1 + x2) / 2 - 4, (y1 + y2) / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText(label, 0, 0); ctx.restore();
+  }
+}
+
+function drawSectionPlaceholder() {
+  const sc = document.getElementById('sectionCanvas');
+  const sctx = sc.getContext('2d');
+  const sw = sc.parentElement.clientWidth - 16;
+  const sh = sc.parentElement.clientHeight - 40;
+  sc.width = sw * devicePixelRatio;
+  sc.height = sh * devicePixelRatio;
+  sc.style.width = sw + 'px';
+  sc.style.height = sh + 'px';
+  sctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  sctx.fillStyle = '#0f0f23';
+  sctx.fillRect(0, 0, sw, sh);
+  sctx.fillStyle = '#555';
+  sctx.font = '13px Microsoft YaHei';
+  sctx.textAlign = 'center';
+  sctx.fillText('点击"画剖面线"按钮，在3D视图上拖拽绘制剖面线', sw / 2, sh / 2);
+}
+
+// ============ 生成剖面图 ============
+function generateSectionDrawing() {
+  if (!state.sectionLine) return;
+  const sl = state.sectionLine;
+
+  const sc = document.getElementById('sectionCanvas');
+  const sctx = sc.getContext('2d');
+  const sw = sc.parentElement.clientWidth - 16;
+  const sh = sc.parentElement.clientHeight - 40;
+  sc.width = sw * devicePixelRatio;
+  sc.height = sh * devicePixelRatio;
+  sc.style.width = sw + 'px';
+  sc.style.height = sh + 'px';
+  sctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  sctx.fillStyle = '#0f0f23';
+  sctx.fillRect(0, 0, sw, sh);
+
+  const slDx = sl.x2 - sl.x1, slDz = sl.z2 - sl.z1;
+  const slLen = Math.hypot(slDx, slDz);
+  if (slLen < 1) return;
+  const slNx = slDx / slLen, slNz = slDz / slLen;
+
+  const slabThk = state.slabThickness;
+  const slabMemThk = state.slabMembraneThk;
+
+  const CF = '#4a8fe7';
+  const CF_FILL = '#6aaaf0';
+  const MF = '#ffc107';
+  const MF_FILL = '#ffd54f';
+  const BG = '#0f0f23';
+
+  let maxDepthMm = 0;
+  for (const p of state.pits) {
+    const d = Math.abs(p.topElev - p.bottomElev) * 1000 + p.bottomThk + p.bottomMembraneThk;
+    maxDepthMm = Math.max(maxDepthMm, d);
+  }
+  const totalDepthMm = maxDepthMm + slabThk + slabMemThk;
+
+  const pad = 50;
+
+  function clipperPathToProjections(paths) {
+    const intervals = [];
+    for (const path of paths) {
+      const projs = [];
+      for (const pt of path) {
+        const x = pt.X / CLIPPER_SCALE;
+        const z = pt.Y / CLIPPER_SCALE;
+        const proj = (x - sl.x1) * slNx + (z - sl.z1) * slNz;
+        projs.push(proj);
+      }
+      if (projs.length < 2) continue;
+      projs.sort((a, b) => a - b);
+      intervals.push({ left: projs[0], right: projs[projs.length - 1] });
+    }
+    return intervals;
+  }
+
+  function mergeIntervals(intervals) {
+    if (intervals.length === 0) return [];
+    const sorted = intervals.slice().sort((a, b) => a.left - b.left);
+    const merged = [sorted[0]];
+    for (let i = 1; i < sorted.length; i++) {
+      const last = merged[merged.length - 1];
+      if (sorted[i].left <= last.right) {
+        last.right = Math.max(last.right, sorted[i].right);
+      } else {
+        merged.push({ left: sorted[i].left, right: sorted[i].right });
+      }
+    }
+    return merged;
+  }
+
+  function subtractIntervals(base, holes) {
+    let result = base.slice();
+    for (const hole of holes) {
+      const next = [];
+      for (const seg of result) {
+        if (hole.right <= seg.left || hole.left >= seg.right) {
+          next.push(seg);
+        } else {
+          if (hole.left > seg.left) next.push({ left: seg.left, right: hole.left });
+          if (hole.right < seg.right) next.push({ left: hole.right, right: seg.right });
+        }
+      }
+      result = next;
+    }
+    return result;
+  }
+
+  const allCavityRaw = [];
+  const allConcreteRaw = [];
+  const allMembraneRaw = [];
+  const pitDepths = [];
+
+  for (const pit of state.pits) {
+    const cavityPath = [pitToClipperPath(pit)];
+    const concreteOutline = clipperOffset(cavityPath, pit.wallThk);
+    const membraneOutline = clipperOffset(concreteOutline, pit.membraneThk);
+
+    for (const cp of cavityPath) allCavityRaw.push(cp);
+    for (const cp of concreteOutline) allConcreteRaw.push(cp);
+    for (const mp of membraneOutline) allMembraneRaw.push(mp);
+
+    const depthMm = Math.abs(pit.topElev - pit.bottomElev) * 1000;
+    pitDepths.push({ pit, depthMm });
+  }
+
+  const allCavityPaths = clipperUnion(allCavityRaw);
+  const allConcretePaths = clipperUnion(allConcreteRaw);
+  const allMembranePaths = clipperUnion(allMembraneRaw);
+
+  const cavityIntervals = mergeIntervals(clipperPathToProjections(allCavityPaths));
+  const concreteIntervals = mergeIntervals(clipperPathToProjections(allConcretePaths));
+  const membraneIntervals = mergeIntervals(clipperPathToProjections(allMembranePaths));
+
+  let maxPitDepth = 0;
+  let maxBottomThk = 0;
+  let maxBottomMemThk = 0;
+  for (const pd of pitDepths) {
+    maxPitDepth = Math.max(maxPitDepth, pd.depthMm - slabThk);
+    maxBottomThk = Math.max(maxBottomThk, pd.pit.bottomThk);
+    maxBottomMemThk = Math.max(maxBottomMemThk, pd.pit.bottomMembraneThk);
+  }
+
+  let slabProjLeft = Infinity, slabProjRight = -Infinity;
+  for (const iv of membraneIntervals) {
+    slabProjLeft = Math.min(slabProjLeft, iv.left);
+    slabProjRight = Math.max(slabProjRight, iv.right);
+  }
+  if (slabProjLeft === Infinity) { slabProjLeft = 0; slabProjRight = slLen; }
+  const slabExt = 200;
+  slabProjLeft -= slabExt;
+  slabProjRight += slabExt;
+
+  const projCenter = (slabProjLeft + slabProjRight) / 2;
+  const projRange = slabProjRight - slabProjLeft;
+  const drawW = sw - pad * 2;
+  const drawH = sh - pad * 2;
+  const scale = Math.min(drawW / projRange, drawH / totalDepthMm) * 0.85;
+
+  function projToX(proj) { return Math.round(sw / 2 + (proj - projCenter) * scale); }
+
+  const slabTopY = Math.round(sh / 2 - (totalDepthMm / 2) * scale);
+  const slabH = Math.round(slabThk * scale);
+  const slabMemH = Math.round(slabMemThk * scale);
+  const slabBottomY = slabTopY + slabH;
+  const slabMemTopY = slabBottomY;
+
+  const slabLeftX = projToX(slabProjLeft);
+  const slabRightX = projToX(slabProjRight);
+  const slabDrawW = slabRightX - slabLeftX;
+
+  const pitDepthPx = Math.round(maxPitDepth * scale);
+  const bottomThkPx = Math.round(maxBottomThk * scale);
+  const bottomMemThkPx = Math.round(maxBottomMemThk * scale);
+  const pitBottomY = slabBottomY + pitDepthPx;
+
+  // ========= PASS 1: 膜层（最低优先级，最先画）=========
+  sctx.fillStyle = MF_FILL;
+  sctx.strokeStyle = MF;
+  sctx.lineWidth = 1.5;
+
+  // 底板底膜（全宽一薄层）
+  const slabMemHoles = subtractIntervals([{ left: slabProjLeft, right: slabProjRight }], membraneIntervals);
+  for (const seg of slabMemHoles) {
+    const lx = projToX(seg.left), rx = projToX(seg.right);
+    sctx.fillRect(lx, slabMemTopY, rx - lx, slabMemH);
+    sctx.strokeRect(lx, slabMemTopY, rx - lx, slabMemH);
+  }
+
+  // 坑体膜（从底板底开始，不含底板底膜，避免叠加）
+  for (const seg of membraneIntervals) {
+    const lx = projToX(seg.left), rx = projToX(seg.right);
+    sctx.fillRect(lx, slabBottomY, rx - lx, pitDepthPx + bottomThkPx + bottomMemThkPx);
+    sctx.strokeRect(lx, slabBottomY, rx - lx, pitDepthPx + bottomThkPx + bottomMemThkPx);
+  }
+
+  // ========= PASS 2: 混凝土层（中优先级，覆盖膜）=========
+  sctx.fillStyle = CF_FILL;
+  sctx.strokeStyle = CF;
+  sctx.lineWidth = 2;
+
+  // 底板区域：全宽减空腔
+  const allConcreteBase = [{ left: slabProjLeft, right: slabProjRight }];
+  const concreteBaseIntervals = subtractIntervals(allConcreteBase, cavityIntervals);
+  for (const seg of concreteBaseIntervals) {
+    const lx = projToX(seg.left), rx = projToX(seg.right);
+    sctx.fillRect(lx, slabTopY, rx - lx, slabH);
+  }
+
+  // 坑体区域：只填充，不描边（与底板一体）
+  for (const seg of concreteIntervals) {
+    const lx = projToX(seg.left), rx = projToX(seg.right);
+    sctx.fillRect(lx, slabBottomY, rx - lx, pitDepthPx + bottomThkPx);
+  }
+
+  // 统一外轮廓描边（不分段）
+  sctx.beginPath();
+  if (concreteBaseIntervals.length > 0) {
+    const first = concreteBaseIntervals[0];
+    const last = concreteBaseIntervals[concreteBaseIntervals.length - 1];
+    const flx = projToX(first.left), frx = projToX(last.right);
+    sctx.moveTo(flx, slabTopY); sctx.lineTo(frx, slabTopY); sctx.lineTo(frx, slabBottomY + pitDepthPx + bottomThkPx); sctx.lineTo(flx, slabBottomY + pitDepthPx + bottomThkPx); sctx.closePath();
+  }
+  sctx.stroke();
+
+  // ========= PASS 3: 空腔层（最高优先级，覆盖一切）=========
+  for (const seg of cavityIntervals) {
+    const lx = projToX(seg.left), rx = projToX(seg.right);
+    sctx.fillStyle = BG;
+    sctx.fillRect(lx, slabTopY, rx - lx, slabH + pitDepthPx);
+    sctx.strokeStyle = CF;
+    sctx.lineWidth = 1;
+    sctx.beginPath();
+    sctx.moveTo(lx, slabTopY); sctx.lineTo(lx, slabBottomY + pitDepthPx);
+    sctx.moveTo(rx, slabTopY); sctx.lineTo(rx, slabBottomY + pitDepthPx);
+    sctx.stroke();
+  }
+
+  for (const seg of cavityIntervals) {
+    const lx = projToX(seg.left), rx = projToX(seg.right);
+    sctx.fillStyle = BG;
+    sctx.fillRect(lx, slabMemTopY, rx - lx, slabMemH);
+  }
+
+  // ========= PASS 4: 标注层 =========
+  sctx.fillStyle = CF;
+  sctx.font = '10px Microsoft YaHei';
+  sctx.textAlign = 'left';
+  sctx.fillText('底板 ' + slabThk + 'mm', slabLeftX + 4, slabTopY + slabH / 2 + 4);
+
+  sctx.fillStyle = MF;
+  sctx.font = '9px Microsoft YaHei';
+  sctx.fillText('底膜 ' + slabMemThk + 'mm', slabLeftX + 4, slabMemTopY + slabMemH / 2 + 3);
+
+  drawElevMark(sctx, slabLeftX - 5, slabTopY, state.pits[0]?.topElev ?? 0, CF);
+
+  // 绘制坑名称（在空腔中间）
+  for (const seg of cavityIntervals) {
+    const lx = projToX(seg.left), rx = projToX(seg.right);
+    const midX = (lx + rx) / 2;
+    sctx.fillStyle = '#e0e0e0';
+    sctx.font = 'bold 11px Microsoft YaHei';
+    sctx.textAlign = 'center';
+    // 找到对应的坑名称
+    for (const pd of pitDepths) {
+      const pit = pd.pit;
+      const pitCavityPath = [pitToClipperPath(pit)];
+      const pitCavInt = mergeIntervals(clipperPathToProjections(pitCavityPath));
+      if (pitCavInt.length > 0 && pitCavInt[0].left >= seg.left - 1 && pitCavInt[0].right <= seg.right + 1) {
+        const pitDepth = pd.depthMm - slabThk;
+        sctx.fillText(pit.name, midX, slabBottomY + pitDepth * scale / 2);
+        break;
+      }
+    }
+  }
+
+  // 整体尺寸标注（在构件外围）
+  if (concreteIntervals.length > 0) {
+    const totalLeft = projToX(concreteIntervals[0].left);
+    const totalRight = projToX(concreteIntervals[concreteIntervals.length - 1].right);
+    const totalWidth = Math.round(concreteIntervals[concreteIntervals.length - 1].right - concreteIntervals[0].left);
+    drawDimLine(sctx, totalLeft, slabTopY - 25, totalRight, slabTopY - 25, totalWidth + 'mm', CF);
+  }
+
+  if (membraneIntervals.length > 0) {
+    const memLeft = projToX(membraneIntervals[0].left);
+    const memRight = projToX(membraneIntervals[membraneIntervals.length - 1].right);
+    const totalMemWidth = Math.round(membraneIntervals[membraneIntervals.length - 1].right - membraneIntervals[0].left);
+    drawDimLine(sctx, memLeft, slabTopY - 40, memRight, slabTopY - 40, totalMemWidth + 'mm', MF);
+  }
+
+  // 深度标注（在最右侧膜外）
+  if (membraneIntervals.length > 0) {
+    const rightMemX = projToX(membraneIntervals[membraneIntervals.length - 1].right);
+    const dimX = rightMemX + 30;
+    drawDimLine(sctx, dimX, slabTopY, dimX, slabMemTopY + pitDepthPx + bottomThkPx + bottomMemThkPx, maxDepthMm + 'mm', CF);
+  }
+
+  // 标高标注
+  for (const seg of concreteIntervals) {
+    const lx = projToX(seg.left);
+    drawElevMark(sctx, lx - 8, slabTopY, state.pits[0]?.topElev ?? 0, CF);
+    break;
+  }
+  for (const seg of membraneIntervals) {
+    const lx = projToX(seg.left);
+    drawElevMark(sctx, lx - 8, slabMemTopY + pitDepthPx + bottomThkPx + bottomMemThkPx, state.pits[0]?.bottomElev ?? 0, CF);
+    break;
+  }
+
+  sctx.fillStyle = '#e0e0e0';
+  sctx.font = 'bold 12px Microsoft YaHei';
+  sctx.textAlign = 'center';
+  sctx.fillText('1-1 剖面图', sw / 2, 14);
+
+  // 剖面标记：左边 1— ，右边 —1
+  if (membraneIntervals.length > 0) {
+    const leftX = projToX(membraneIntervals[0].left);
+    const rightX = projToX(membraneIntervals[membraneIntervals.length - 1].right);
+    const markY = slabTopY;
+    const markH = slabMemTopY + pitDepthPx + bottomThkPx + bottomMemThkPx - slabTopY;
+
+    sctx.strokeStyle = '#ffeb3b';
+    sctx.lineWidth = 1.5;
+    sctx.fillStyle = '#ffeb3b';
+    sctx.font = 'bold 14px Microsoft YaHei';
+    sctx.textAlign = 'center';
+    sctx.textBaseline = 'middle';
+
+    sctx.beginPath();
+    sctx.moveTo(leftX, markY); sctx.lineTo(leftX - 25, markY);
+    sctx.moveTo(leftX, markY + markH); sctx.lineTo(leftX - 25, markY + markH);
+    sctx.stroke();
+
+    sctx.fillText('1', leftX - 35, markY);
+    sctx.fillText('1', leftX - 35, markY + markH);
+
+    sctx.beginPath();
+    sctx.moveTo(rightX, markY); sctx.lineTo(rightX + 25, markY);
+    sctx.moveTo(rightX, markY + markH); sctx.lineTo(rightX + 25, markY + markH);
+    sctx.stroke();
+
+    sctx.fillText('1', rightX + 35, markY);
+    sctx.fillText('1', rightX + 35, markY + markH);
+  }
+
+  drawPlanWithDimensions();
+}
+
+function rectLineIntersect(sl, rect, slNx, slNz) {
+  const corners = [
+    { x: rect.left, z: rect.top }, { x: rect.right, z: rect.top },
+    { x: rect.right, z: rect.bottom }, { x: rect.left, z: rect.bottom }
+  ];
+  const edges = [[corners[0], corners[1]], [corners[1], corners[2]], [corners[2], corners[3]], [corners[3], corners[0]]];
+  const projs = [];
+  for (const [p1, p2] of edges) {
+    const t = lineLineIntersect(sl.x1, sl.z1, sl.x2, sl.z2, p1.x, p1.z, p2.x, p2.z);
+    if (t !== null && t >= 0 && t <= 1) {
+      const ix = sl.x1 + t * (sl.x2 - sl.x1);
+      const iz = sl.z1 + t * (sl.z2 - sl.z1);
+      const proj = (ix - sl.x1) * slNx + (iz - sl.z1) * slNz;
+      projs.push(proj);
+    }
+  }
+  return projs;
+}
+
+function drawElevMark(ctx, x, y, elev, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1;
+  ctx.font = '10px Microsoft YaHei';
+  ctx.textAlign = 'right';
+  ctx.beginPath();
+  ctx.moveTo(x, y - 18);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x - 4, y - 4);
+  ctx.stroke();
+  ctx.fillText(elev.toFixed(2), x - 2, y - 20);
+  ctx.restore();
+}
+
+function lineLineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 0.001) return null;
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
+  if (u >= 0 && u <= 1) return t;
+  return null;
+}
+
+function lineCircleIntersect(x1, y1, x2, y2, cx, cy, r) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const fx = x1 - cx, fy = y1 - cy;
+  const a = dx * dx + dy * dy;
+  const b = 2 * (fx * dx + fy * dy);
+  const c = fx * fx + fy * fy - r * r;
+  const disc = b * b - 4 * a * c;
+  if (disc < 0) return null;
+  const sq = Math.sqrt(disc);
+  return [(-b - sq) / (2 * a), (-b + sq) / (2 * a)];
+}
+
+// ============ 导出功能 ============
+window.exportDXF = function() {
+  let dxf = '0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n';
+
+  for (const pit of state.pits) {
+    if (pit.type === 'rect') {
+      const b = getPitBounds(pit);
+      dxf += `0\nLWPOLYLINE\n8\n0\n90\n4\n70\n1\n`;
+      dxf += `10\n${b.left}\n20\n${b.top}\n10\n${b.right}\n20\n${b.top}\n10\n${b.right}\n20\n${b.bottom}\n10\n${b.left}\n20\n${b.bottom}\n`;
+    } else {
+      dxf += `0\nCIRCLE\n8\n0\n10\n${pit.cx}\n20\n${pit.cy}\n40\n${pit.diameter / 2}\n`;
+    }
+  }
+
+  dxf += '0\nENDSEC\n0\nEOF\n';
+
+  const blob = new Blob([dxf], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'pit-detail.dxf'; a.click();
+  URL.revokeObjectURL(url);
+};
+
+window.exportPNG = function() {
+  const pc = document.getElementById('planCanvas');
+  const sc = document.getElementById('sectionCanvas');
+
+  const expCanvas = document.createElement('canvas');
+  expCanvas.width = pc.width + sc.width + 40 * devicePixelRatio;
+  expCanvas.height = Math.max(pc.height, sc.height) + 60 * devicePixelRatio;
+  const ectx = expCanvas.getContext('2d');
+  ectx.fillStyle = '#fff';
+  ectx.fillRect(0, 0, expCanvas.width, expCanvas.height);
+  ectx.drawImage(pc, 10 * devicePixelRatio, 10 * devicePixelRatio);
+  ectx.drawImage(sc, pc.width + 30 * devicePixelRatio, 10 * devicePixelRatio);
+
+  const url = expCanvas.toDataURL('image/png');
+  const a = document.createElement('a');
+  a.href = url; a.download = 'pit-detail.png'; a.click();
+};
+
+// ============ 初始化 ============
+resizeCanvas();
+updatePropsPanel();
+
+// 添加示例坑体
+const pit1 = createPit('rect', -1500, 0, { width: 2000, height: 2000, name: '电梯井1' });
+const pit2 = createPit('rect', 1500, 0, { width: 2500, height: 2000, name: '集水井1' });
+const pit3 = createPit('circle', 0, -2000, { diameter: 1500, name: '集水井2' });
+state.selectedPitId = pit1.id;
+updatePropsPanel();
+zoomFit();
+
+</script>
+</body>
+</html>

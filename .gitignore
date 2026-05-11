@@ -38,3 +38,19 @@ ios/ios.txt
 
 harmony/
 wxxcx/
+
+build*-errors.txt
+build*-log.txt
+build*-logs.zip
+check-build*.js
+check-errors.js
+check-latest-build.js
+check-logs.js
+check-signing.js
+update-password.js
+update-secrets*.js
+push-to-github.ps1
+work1/
+*.apk
+*.zip
+ios/ios.zip

@@ -17,6 +17,7 @@ interface ActionTab {
   icon: ReactNode;
   label: string;
   onPress?: () => void;
+  active?: boolean;
 }
 
 interface BottomActionBarProps {
@@ -53,12 +54,12 @@ export const BottomActionBar: FC<BottomActionBarProps> = ({
         {tabs.map((tab, index) => (
           <TouchableOpacity
             key={index}
-            style={styles.tab}
+            style={[styles.tab, tab.active && styles.tabActive]}
             onPress={tab.onPress}
             disabled={!tab.onPress}
           >
             {tab.icon}
-            <Text style={styles.tabLabel}>{tab.label}</Text>
+            <Text style={[styles.tabLabel, tab.active && styles.tabLabelActive]}>{tab.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -118,10 +119,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
   },
+  tabActive: {
+    borderColor: 'rgba(233,69,96,0.5)',
+    backgroundColor: 'rgba(233,69,96,0.1)',
+  },
   tabLabel: {
     fontSize: FontSize.xs,
     color: 'rgba(255, 255, 255, 0.6)',
     marginLeft: 4,
+  },
+  tabLabelActive: {
+    color: '#e94560',
   },
   buttonContainer: {
     paddingHorizontal: 20,

@@ -1,11 +1,12 @@
 import Foundation
 import UIKit
+import React
 
 @objc(IncomingShareModule)
 class IncomingShareModule: RCTEventEmitter {
 
-  private static var pendingFiles: [[String: String]] = []
-  private static var hasListeners = false
+  fileprivate static var pendingFiles: [[String: String]] = []
+  fileprivate static var hasListeners = false
 
   override static func requiresMainQueueSetup() -> Bool {
     return true
@@ -41,7 +42,7 @@ class IncomingShareModule: RCTEventEmitter {
   }
 
   @objc(removeListeners:)
-  override func removeListeners(_ count: Int) {
+  override func removeListeners(_ count: Double) {
     super.removeListeners(count)
   }
 
@@ -51,7 +52,7 @@ class IncomingShareModule: RCTEventEmitter {
 
     guard !files.isEmpty else { return }
 
-    if let bridge = self.bridge {
+    if self.bridge != nil {
       let params: [[String: String]] = files.map { file in
         return [
           "uri": file["uri"] ?? "",

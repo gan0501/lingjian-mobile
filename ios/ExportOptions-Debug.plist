@@ -5,13 +5,13 @@
 	<key>method</key>
 	<string>ad-hoc</string>
 	<key>teamID</key>
-	<string>YOUR_TEAM_ID</string>
+	<string>2P6FW3ZA4H</string>
 	<key>signingStyle</key>
-	<string>manual</key>
+	<string>manual</string>
 	<key>provisioningProfiles</key>
 	<dict>
-		<key>uni.UNI91AD0BF</key>
-		<string>TestUniapp</string>
+		<key>cn.lingjian.zswcom</key>
+		<string>match Development cn.lingjian.zswcom</string>
 	</dict>
 	<key>stripSwiftSymbols</key>
 	<true/>

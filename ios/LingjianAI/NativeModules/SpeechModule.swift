@@ -1,5 +1,6 @@
 import Foundation
 import Speech
+import React
 
 @objc(SpeechModule)
 class SpeechModule: RCTEventEmitter {
@@ -152,7 +153,7 @@ class SpeechModule: RCTEventEmitter {
   }
 
   @objc(removeListeners:)
-  override func removeListeners(_ count: Int) {
+  override func removeListeners(_ count: Double) {
     super.removeListeners(count)
   }
 }

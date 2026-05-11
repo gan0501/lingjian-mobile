@@ -5,13 +5,13 @@
 	<key>method</key>
 	<string>app-store</string>
 	<key>teamID</key>
-	<string>YOUR_TEAM_ID</string>
+	<string>2P6FW3ZA4H</string>
 	<key>signingStyle</key>
 	<string>manual</string>
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>cn.lingjian.zswcom</key>
-		<string>LJ</string>
+		<string>match AppStore cn.lingjian.zswcom</string>
 	</dict>
 	<key>stripSwiftSymbols</key>
 	<true/>

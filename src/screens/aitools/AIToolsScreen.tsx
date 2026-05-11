@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import {
   FileEdit, Calculator, Boxes, Ruler, Camera, Stamp, ChevronRight,
-  ChevronLeft, CreditCard, Crown, Box, Hash,
+  ChevronLeft, CreditCard, Crown, Box, Hash, PenTool,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/stores';
 import { API_CONFIG } from '@/constants';
@@ -65,16 +65,16 @@ const AI_TOOLS: AIToolItem[] = [
     screen: 'Building3D',
   },
   {
-    id: 'cad_viewer',
-    title: 'CAD看图',
-    description: '移动端高效看图 · 测量标注 · 多人协作',
-    icon: Ruler,
-    color: '#E67E22',
+    id: 'pit_detail',
+    title: '井坑详图',
+    description: '电梯井/集水井 平面&剖面图生成工具',
+    icon: PenTool,
+    color: '#E94560',
     isMemberOnly: false,
     isAvailable: true,
     estimatedCost: '会员免费',
     costColor: '#27AE60',
-    screen: 'CADViewer',
+    screen: 'PitDetail',
   },
   {
     id: 'id_photo',
@@ -87,6 +87,18 @@ const AI_TOOLS: AIToolItem[] = [
     estimatedCost: '会员免费',
     costColor: '#27AE60',
     screen: 'IDPhoto',
+  },
+  {
+    id: 'cad_viewer',
+    title: 'CAD看图',
+    description: '移动端高效看图 · 测量标注 · 多人协作',
+    icon: Ruler,
+    color: '#E67E22',
+    isMemberOnly: false,
+    isAvailable: true,
+    estimatedCost: '会员免费',
+    costColor: '#27AE60',
+    screen: 'CADViewer',
   },
   // {
   //   id: 'blueprint_to_3d',

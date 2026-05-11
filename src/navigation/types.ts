@@ -23,6 +23,7 @@ export type RootStackParamList = {
   IDPhoto: undefined;
   Building3D: undefined;
   CADViewer: { sharedFile?: { name: string; uri: string } } | undefined;
+  PitDetail: undefined;
   TokenPrice: undefined;
   BlueprintTo3D: undefined;
   BlueprintList: undefined;

@@ -12,6 +12,7 @@ import HomeScreen from '@/screens/home/HomeScreen';
 import { LoginScreen } from '@/screens/auth';
 import { AIToolsScreen, IDPhotoScreen } from '@/screens/aitools';
 import CADViewerScreen from '@/screens/aitools/cadviewer/CADViewerScreen';
+import PitDetailScreen from '@/screens/aitools/pitdetail/PitDetailScreen';
 import Building3DScreen from '@/screens/aitools/building3d/Building3DScreen';
 import BidWriterContainer from '@/screens/aitools/bidwriter/BidWriterContainer';
 import BidHtmlPreviewScreen from '@/screens/aitools/bidwriter/BidHtmlPreviewScreen';
@@ -64,6 +65,7 @@ const RootNavigator: React.FC = () => {
           <Stack.Screen name="AITools" component={AIToolsScreen} />
           <Stack.Screen name="IDPhoto" component={IDPhotoScreen} />
           <Stack.Screen name="CADViewer" component={CADViewerScreen} />
+          <Stack.Screen name="PitDetail" component={PitDetailScreen} />
           <Stack.Screen name="Building3D" component={Building3DScreen} />
           <Stack.Screen name="BidWriter" component={BidWriterContainer} />
           <Stack.Screen name="BidHtmlPreview" component={BidHtmlPreviewScreen} />

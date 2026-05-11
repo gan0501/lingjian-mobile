@@ -1,10 +1,10 @@
 import Foundation
-import GCDWebServer
+import React
 
 @objc(AssetServerModule)
 class AssetServerModule: RCTEventEmitter {
 
-  private static var webServer: GCDWebServer?
+  private static var webServerPort: UInt = 0
 
   override static func requiresMainQueueSetup() -> Bool {
     return false
@@ -16,8 +16,8 @@ class AssetServerModule: RCTEventEmitter {
 
   @objc(start:withRejecter:)
   func start(_ resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
-    if AssetServerModule.webServer != nil {
-      resolve("http://localhost:\(AssetServerModule.webServer!.port)")
+    if AssetServerModule.webServerPort > 0 {
+      resolve("http://localhost:\(AssetServerModule.webServerPort)")
       return
     }
 
@@ -26,33 +26,20 @@ class AssetServerModule: RCTEventEmitter {
       return
     }
 
-    let server = GCDWebServer()
-
-    server.addGETHandler(
-      forBasePath: "/",
-      directoryPath: resourcePath,
-      indexFilename: nil,
-      cacheAge: 0,
-      allowRangeRequests: true
-    )
-
-    do {
-      try server.start(options: [
-        GCDWebServerOption_Port: 38080,
-        GCDWebServerOption_BindToLocalhost: true
-      ])
-      AssetServerModule.webServer = server
-      resolve("http://localhost:\(server.port)")
-    } catch {
-      reject("ERR_SERVER", error.localizedDescription, nil)
+    let port = AssetServerBridge.startServer(withResourcePath: resourcePath)
+    if port > 0 {
+      AssetServerModule.webServerPort = port
+      resolve("http://localhost:\(port)")
+    } else {
+      reject("ERR_SERVER", "Failed to start server", nil)
     }
   }
 
   @objc(stop:withRejecter:)
   func stop(_ resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
-    AssetServerModule.webServer?.stop()
-    AssetServerModule.webServer = nil
-    resolve(nil)
+    AssetServerBridge.stopServer()
+    AssetServerModule.webServerPort = 0
+    resolve(NSNull())
   }
 
   @objc(addListener:)
@@ -61,15 +48,7 @@ class AssetServerModule: RCTEventEmitter {
   }
 
   @objc(removeListeners:)
-  override func removeListeners(_ count: Int) {
+  override func removeListeners(_ count: Double) {
     super.removeListeners(count)
-  }
-}
-
-@objc(AssetServerBridge)
-class AssetServerBridge: NSObject {
-  @objc static func startServer() {
-    let module = AssetServerModule()
-    module.start({ _ in }, reject: { _, _, _ in })
   }
 }

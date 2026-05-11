@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>井坑详图</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0f0f23;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+#mainCanvas{width:100%;height:100%;display:block}
+#threeContainer{width:100%;height:100%;display:none;position:relative;background:#0f0f23}
+#threeContainer canvas{width:100%;height:100%;display:block}
+#planCanvas,#sectionCanvas{display:none}
+.snap-indicator{position:absolute;bottom:8px;left:8px;font-size:11px;color:#4caf50;display:flex;align-items:center;gap:4px;pointer-events:none}
+.snap-indicator.hidden{display:none}
+.draw-mode-hint{position:absolute;top:12px;left:50%;transform:translateX(-50%);font-size:12px;color:rgba(255,255,255,0.5);background:rgba(0,0,0,0.4);padding:4px 12px;border-radius:12px;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="mainCanvas"></canvas>
+<div id="threeContainer"></div>
+<canvas id="planCanvas" width="600" height="400"></canvas>
+<canvas id="sectionCanvas" width="600" height="400"></canvas>
+<div class="snap-indicator hidden" id="snapIndicator">
+  <svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="#4caf50"/></svg>
+  <span id="snapText">吸附对齐</span>
+</div>
+<div class="draw-mode-hint" id="drawModeHint">手绘坑体</div>
+
+<script src="https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js"></script>
+<script src="file:///android_asset/three-r128.min.js"></script>
+<script>if(typeof THREE==='undefined'){document.write('<scr'+'ipt src="https://unpkg.com/three@0.128.0/build/three.min.js"><\/scr'+'ipt>')}</script>
+<script src="file:///android_asset/OrbitControls-r128.js"></script>
+<script>if(!THREE.OrbitControls){document.write('<scr'+'ipt src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"><\/scr'+'ipt>')}</script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
+
+<script>
+(function(){
+'use strict';
+
+var mergeGeometries = THREE.BufferGeometryUtils
+  ? (THREE.BufferGeometryUtils.mergeBufferGeometries || THREE.BufferGeometryUtils.mergeGeometries)
+  : function(geos){ var m = new THREE.BufferGeometry(); return m; };
+
+function sendToRN(data){
+  try{ window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(data)); }catch(e){}
+}
+
+var state = {
+  currentStep: 1,
+  currentTool: 'draw',
+  pits: [],
+  selectedPitId: null,
+  isDragging: false,
+  dragStart: null,
+  dragCurrent: null,
+  isMoving: false,
+  moveOffset: null,
+  snapInfo: null,
+  canvasOffset: {x:0,y:0},
+  canvasScale: 1,
+  nextId: 1,
+  sectionLine: null,
+  isDrawingSection: false,
+  slabThickness: 800,
+  slabMembraneThk: 100,
+  sectionDrawMode: false,
+  drawPoints: [],
+  isDrawing: false,
+  pinchStartDist: 0,
+  pinchStartScale: 1,
+  lastTouchCenter: null,
+};
+
+var SNAP_THRESHOLD = 8;
+var SCALE = 5;
+
+var canvas = document.getElementById('mainCanvas');
+var ctx = canvas.getContext('2d');
+var canvasW, canvasH;
+
+function resizeCanvas(){
+  canvasW = window.innerWidth;
+  canvasH = window.innerHeight;
+  canvas.width = canvasW * devicePixelRatio;
+  canvas.height = canvasH * devicePixelRatio;
+  canvas.style.width = canvasW + 'px';
+  canvas.style.height = canvasH + 'px';
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  render();
+}
+
+window.addEventListener('resize', function(){
+  resizeCanvas();
+  if(state.currentStep >= 2) resizeThree();
+});
+
+function toWorld(sx,sy){
+  return {
+    x: (sx - canvasW/2 - state.canvasOffset.x) / state.canvasScale,
+    y: (sy - canvasH/2 - state.canvasOffset.y) / state.canvasScale
+  };
+}
+
+function toScreen(wx,wy){
+  return {
+    x: wx * state.canvasScale + canvasW/2 + state.canvasOffset.x,
+    y: wy * state.canvasScale + canvasH/2 + state.canvasOffset.y
+  };
+}
+
+function createPit(type, cx, cy, props){
+  var defaults = {
+    rect: {width:2000,height:2000,topElev:-0.5,bottomElev:-2.0,wallThk:300,membraneThk:100,bottomThk:400,bottomMembraneThk:100},
+    circle: {diameter:2000,topElev:-0.5,bottomElev:-2.0,wallThk:300,membraneThk:100,bottomThk:400,bottomMembraneThk:100}
+  };
+  var d = defaults[type];
+  var pit = Object.assign({id:state.nextId++,type:type,cx:cx,cy:cy,name:type==='rect'?'矩形井':'圆形井'},d,props);
+  pit.depth = pit.topElev - pit.bottomElev;
+  state.pits.push(pit);
+  sendToRN({type:'pitCreated', pit:pit});
+  sendToRN({type:'pitsChanged', pits:getPitsSummary()});
+  return pit;
+}
+
+function getPitsSummary(){
+  return state.pits.map(function(p){return {id:p.id,type:p.type,cx:p.cx,cy:p.cy,name:p.name,width:p.width,height:p.height,diameter:p.diameter,topElev:p.topElev,bottomElev:p.bottomElev,wallThk:p.wallThk,membraneThk:p.membraneThk,bottomThk:p.bottomThk,bottomMembraneThk:p.bottomMembraneThk,depth:p.depth};});
+}
+
+function getPitBounds(pit){
+  if(pit.type==='rect'){
+    var hw=pit.width/2, hh=pit.height/2;
+    return {left:pit.cx-hw,top:pit.cy-hh,right:pit.cx+hw,bottom:pit.cy+hh};
+  }else{
+    var r=pit.diameter/2;
+    return {left:pit.cx-r,top:pit.cy-r,right:pit.cx+r,bottom:pit.cy+r};
+  }
+}
+
+function pointInPit(pit,wx,wy){
+  if(pit.type==='rect'){
+    var b=getPitBounds(pit);
+    return wx>=b.left && wx<=b.right && wy>=b.top && wy<=b.bottom;
+  }else{
+    var r=pit.diameter/2;
+    return Math.hypot(wx-pit.cx,wy-pit.cy)<=r;
+  }
+}
+
+function render(){
+  ctx.clearRect(0,0,canvasW,canvasH);
+  drawGrid();
+  drawPits();
+  drawSnapGuides();
+  drawDragPreview();
+  drawFreehandPreview();
+}
+
+function drawGrid(){
+  var baseGrid=500;
+  var gridSize=baseGrid*state.canvasScale;
+  if(gridSize<8) return;
+  var ox=(canvasW/2+state.canvasOffset.x)%gridSize;
+  var oy=(canvasH/2+state.canvasOffset.y)%gridSize;
+  ctx.strokeStyle='rgba(15,52,96,0.5)';
+  ctx.lineWidth=0.5;
+  for(var x=ox;x<canvasW;x+=gridSize){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvasH);ctx.stroke();}
+  for(var y=oy;y<canvasH;y+=gridSize){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvasW,y);ctx.stroke();}
+  var majorGrid=gridSize*5;
+  var mox=(canvasW/2+state.canvasOffset.x)%majorGrid;
+  var moy=(canvasH/2+state.canvasOffset.y)%majorGrid;
+  ctx.strokeStyle='rgba(15,52,96,0.9)';
+  ctx.lineWidth=1;
+  for(var x=mox;x<canvasW;x+=majorGrid){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvasH);ctx.stroke();}
+  for(var y=moy;y<canvasH;y+=majorGrid){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvasW,y);ctx.stroke();}
+  if(majorGrid>30){
+    ctx.fillStyle='rgba(74,143,231,0.4)';
+    ctx.font='10px sans-serif';
+    ctx.textAlign='center';
+    for(var x=mox;x<canvasW;x+=majorGrid){
+      var worldX=Math.round((x-canvasW/2-state.canvasOffset.x)/state.canvasScale);
+      if(worldX!==0) ctx.fillText(worldX+'',x,canvasH/2+state.canvasOffset.y+14);
+    }
+    ctx.textAlign='right';
+    for(var y=moy;y<canvasH;y+=majorGrid){
+      var worldY=Math.round((y-canvasH/2-state.canvasOffset.y)/state.canvasScale);
+      if(worldY!==0) ctx.fillText(worldY+'',canvasW/2+state.canvasOffset.x-4,y+4);
+    }
+  }
+}
+
+function drawPits(){
+  for(var i=0;i<state.pits.length;i++){
+    var pit=state.pits[i];
+    var isSelected=pit.id===state.selectedPitId;
+    var s=toScreen(pit.cx,pit.cy);
+    if(pit.type==='rect'){
+      var sw=pit.width*state.canvasScale;
+      var sh=pit.height*state.canvasScale;
+      ctx.save();
+      ctx.fillStyle=isSelected?'rgba(233,69,96,0.15)':'rgba(15,52,96,0.4)';
+      ctx.strokeStyle=isSelected?'#e94560':'#4a8fe7';
+      ctx.lineWidth=isSelected?2:1.5;
+      ctx.fillRect(s.x-sw/2,s.y-sh/2,sw,sh);
+      ctx.strokeRect(s.x-sw/2,s.y-sh/2,sw,sh);
+      ctx.strokeStyle=isSelected?'rgba(233,69,96,0.4)':'rgba(74,143,231,0.3)';
+      ctx.lineWidth=0.5;
+      ctx.setLineDash([4,4]);
+      var wallPx=pit.wallThk*state.canvasScale;
+      var memPx=pit.membraneThk*state.canvasScale;
+      var outerW=sw+2*(wallPx+memPx);
+      var outerH=sh+2*(wallPx+memPx);
+      ctx.strokeRect(s.x-outerW/2,s.y-outerH/2,outerW,outerH);
+      var wallW=sw+2*wallPx;
+      var wallH=sh+2*wallPx;
+      ctx.strokeRect(s.x-wallW/2,s.y-wallH/2,wallW,wallH);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }else{
+      var sr=pit.diameter/2*state.canvasScale;
+      ctx.save();
+      ctx.fillStyle=isSelected?'rgba(233,69,96,0.15)':'rgba(15,52,96,0.4)';
+      ctx.strokeStyle=isSelected?'#e94560':'#4a8fe7';
+      ctx.lineWidth=isSelected?2:1.5;
+      ctx.beginPath();ctx.arc(s.x,s.y,sr,0,Math.PI*2);ctx.fill();ctx.stroke();
+      ctx.strokeStyle=isSelected?'rgba(233,69,96,0.4)':'rgba(74,143,231,0.3)';
+      ctx.lineWidth=0.5;
+      ctx.setLineDash([4,4]);
+      ctx.beginPath();ctx.arc(s.x,s.y,sr+wallPx,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(s.x,s.y,sr+wallPx+memPx,0,Math.PI*2);ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+    ctx.fillStyle=isSelected?'#e94560':'#4a8fe7';
+    ctx.font='11px sans-serif';
+    ctx.textAlign='center';
+    var labelY=pit.type==='rect'?s.y-pit.height/2*state.canvasScale-8:s.y-pit.diameter/2*state.canvasScale-8;
+    ctx.fillText(pit.name,s.x,labelY);
+    if(isSelected) drawDimensions(pit);
+  }
+}
+
+function drawDimensions(pit){
+  ctx.strokeStyle='#e94560';
+  ctx.fillStyle='#e94560';
+  ctx.lineWidth=1;
+  ctx.font='10px sans-serif';
+  ctx.textAlign='center';
+  if(pit.type==='rect'){
+    var b=getPitBounds(pit);
+    var tl=toScreen(b.left,b.top);
+    var tr=toScreen(b.right,b.top);
+    var bl=toScreen(b.left,b.bottom);
+    var dimOff=20;
+    ctx.beginPath();ctx.moveTo(tl.x,tl.y-dimOff);ctx.lineTo(tr.x,tr.y-dimOff);ctx.stroke();
+    ctx.fillText(pit.width+'',(tl.x+tr.x)/2,tl.y-dimOff-4);
+    ctx.beginPath();ctx.moveTo(tl.x-dimOff,tl.y);ctx.lineTo(bl.x-dimOff,bl.y);ctx.stroke();
+    ctx.save();ctx.translate(tl.x-dimOff-4,(tl.y+bl.y)/2);ctx.rotate(-Math.PI/2);ctx.fillText(pit.height+'',0,0);ctx.restore();
+  }else{
+    var s=toScreen(pit.cx,pit.cy);
+    var sr=pit.diameter/2*state.canvasScale;
+    ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x+sr,s.y);ctx.stroke();
+    ctx.fillText('\u2300'+pit.diameter,s.x+sr/2,s.y-6);
+  }
+}
+
+function drawSnapGuides(){
+  if(!state.snapInfo) return;
+  ctx.save();
+  ctx.strokeStyle='rgba(76,175,80,0.6)';
+  ctx.lineWidth=0.5;
+  ctx.setLineDash([3,3]);
+  for(var i=0;i<state.snapInfo.guides.length;i++){
+    var guide=state.snapInfo.guides[i];
+    ctx.beginPath();
+    if(guide.type==='h'){
+      var y=guide.value*state.canvasScale+canvasH/2+state.canvasOffset.y;
+      ctx.moveTo(0,y);ctx.lineTo(canvasW,y);
+    }else{
+      var x=guide.value*state.canvasScale+canvasW/2+state.canvasOffset.x;
+      ctx.moveTo(x,0);ctx.lineTo(canvasH,x);
+    }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawDragPreview(){
+  if(!state.isDragging||!state.dragStart||!state.dragCurrent) return;
+  var s1=state.dragStart, s2=state.dragCurrent;
+  ctx.save();
+  ctx.strokeStyle='#e94560';
+  ctx.lineWidth=1.5;
+  ctx.setLineDash([5,5]);
+  ctx.strokeRect(Math.min(s1.x,s2.x),Math.min(s1.y,s2.y),Math.abs(s2.x-s1.x),Math.abs(s2.y-s1.y));
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawFreehandPreview(){
+  if(state.drawPoints.length<2) return;
+  ctx.save();
+  ctx.strokeStyle='rgba(233,69,96,0.7)';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(state.drawPoints[0].x,state.drawPoints[0].y);
+  for(var i=1;i<state.drawPoints.length;i++){
+    ctx.lineTo(state.drawPoints[i].x,state.drawPoints[i].y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function calcSnap(pit, newCx, newCy){
+  if(state.pits.length<2) return {cx:newCx,cy:newCy,guides:[]};
+  var guides=[];
+  var bestDx=Infinity, bestDy=Infinity, snapCx=newCx, snapCy=newCy;
+  var curB=getPitBounds(Object.assign({},pit,{cx:newCx,cy:newCy}));
+  var curCx=(curB.left+curB.right)/2;
+  var curCy=(curB.top+curB.bottom)/2;
+  for(var i=0;i<state.pits.length;i++){
+    var other=state.pits[i];
+    if(other.id===pit.id) continue;
+    var oB=getPitBounds(other);
+    var oCx=(oB.left+oB.right)/2;
+    var oCy=(oB.top+oB.bottom)/2;
+    var checks=[
+      {my:curB.left,oy:oB.left,axis:'v',label:'左对齐'},
+      {my:curB.left,oy:oB.right,axis:'v',label:'左贴右'},
+      {my:curB.right,oy:oB.right,axis:'v',label:'右对齐'},
+      {my:curB.right,oy:oB.left,axis:'v',label:'右贴左'},
+      {my:curCx,oy:oCx,axis:'v',label:'中心X'},
+      {my:curB.top,oy:oB.top,axis:'h',label:'顶对齐'},
+      {my:curB.top,oy:oB.bottom,axis:'h',label:'顶贴底'},
+      {my:curB.bottom,oy:oB.bottom,axis:'h',label:'底对齐'},
+      {my:curB.bottom,oy:oB.top,axis:'h',label:'底贴顶'},
+      {my:curCy,oy:oCy,axis:'h',label:'中心Y'},
+    ];
+    for(var j=0;j<checks.length;j++){
+      var ck=checks[j];
+      var dist=Math.abs(ck.my-ck.oy);
+      var thresh=SNAP_THRESHOLD/state.canvasScale;
+      if(ck.axis==='v'&&dist<thresh&&dist<Math.abs(bestDx)){
+        bestDx=ck.oy-ck.my+(ck.axis==='v'?newCx-curCx:0);
+        snapCx=newCx+bestDx;
+        guides.push({type:'v',value:ck.oy,label:ck.label});
+      }
+      if(ck.axis==='h'&&dist<thresh&&dist<Math.abs(bestDy)){
+        bestDy=ck.oy-ck.my+(ck.axis==='h'?newCy-curCy:0);
+        snapCy=newCy+bestDy;
+        guides.push({type:'h',value:ck.oy,label:ck.label});
+      }
+    }
+  }
+  if(Math.abs(bestDx)>=Infinity) snapCx=newCx;
+  if(Math.abs(bestDy)>=Infinity) snapCy=newCy;
+  var snapped=Math.abs(snapCx-newCx)>0.01||Math.abs(snapCy-newCy)>0.01;
+  return {cx:snapCx,cy:snapCy,guides:snapped?guides:[],snapped:snapped};
+}
+
+function recognizeShape(points){
+  if(points.length<8) return null;
+  var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(var i=0;i<points.length;i++){
+    minX=Math.min(minX,points[i].x);minY=Math.min(minY,points[i].y);
+    maxX=Math.max(maxX,points[i].x);maxY=Math.max(maxY,points[i].y);
+  }
+  var w=maxX-minX, h=maxY-minY;
+  if(w<20&&h<20) return null;
+  var cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  var sumDist=0, sumSqDist=0;
+  for(var i=0;i<points.length;i++){
+    var d=Math.hypot(points[i].x-cx,points[i].y-cy);
+    sumDist+=d; sumSqDist+=d*d;
+  }
+  var meanDist=sumDist/points.length;
+  var variance=sumSqDist/points.length-meanDist*meanDist;
+  var cv=Math.sqrt(Math.max(0,variance))/Math.max(1,meanDist);
+  var aspectRatio=Math.max(w,h)/Math.min(w,h);
+  if(cv<0.2&&aspectRatio<1.3){
+    var w1=toWorld(minX,minY);
+    var w2=toWorld(maxX,maxY);
+    var worldW=Math.abs(w2.x-w1.x);
+    var worldH=Math.abs(w2.y-w1.y);
+    var worldCx=(w1.x+w2.x)/2;
+    var worldCy=(w1.y+w2.y)/2;
+    return {type:'circle',cx:worldCx,cy:worldCy,diameter:Math.round(Math.max(worldW,worldH))};
+  }
+  var w1=toWorld(minX,minY);
+  var w2=toWorld(maxX,maxY);
+  var worldW=Math.abs(w2.x-w1.x);
+  var worldH=Math.abs(w2.y-w1.y);
+  var worldCx=(w1.x+w2.x)/2;
+  var worldCy=(w1.y+w2.y)/2;
+  return {type:'rect',cx:worldCx,cy:worldCy,width:Math.round(worldW),height:Math.round(worldH)};
+}
+
+var touchStartTime=0;
+var touchStartPos=null;
+var isTouchMoving=false;
+var touchMoved=false;
+
+canvas.addEventListener('touchstart',function(e){
+  e.preventDefault();
+  if(e.touches.length===1){
+    var t=e.touches[0];
+    var rect=canvas.getBoundingClientRect();
+    var sx=t.clientX-rect.left, sy=t.clientY-rect.top;
+    var w=toWorld(sx,sy);
+    touchStartTime=Date.now();
+    touchStartPos={x:sx,y:sy};
+    touchMoved=false;
+    isTouchMoving=false;
+
+    if(state.currentTool==='select'){
+      var found=null;
+      for(var i=state.pits.length-1;i>=0;i--){
+        if(pointInPit(state.pits[i],w.x,w.y)){found=state.pits[i];break;}
+      }
+      if(found){
+        state.selectedPitId=found.id;
+        state.isMoving=true;
+        state.moveOffset={x:w.x-found.cx,y:w.y-found.cy};
+        sendToRN({type:'pitSelected',id:found.id,pit:found});
+      }else{
+        state.selectedPitId=null;
+        state.isMoving=false;
+        sendToRN({type:'pitDeselected'});
+      }
+      render();
+    }else if(state.currentTool==='draw'){
+      state.isDrawing=true;
+      state.drawPoints=[{x:sx,y:sy}];
+    }
+  }else if(e.touches.length===2){
+    state.isDrawing=false;
+    state.drawPoints=[];
+    var t1=e.touches[0], t2=e.touches[1];
+    state.pinchStartDist=Math.hypot(t2.clientX-t1.clientX,t2.clientY-t1.clientY);
+    state.pinchStartScale=state.canvasScale;
+    state.lastTouchCenter={x:(t1.clientX+t2.clientX)/2,y:(t1.clientY+t2.clientY)/2};
+  }
+},{passive:false});
+
+canvas.addEventListener('touchmove',function(e){
+  e.preventDefault();
+  if(e.touches.length===1){
+    var t=e.touches[0];
+    var rect=canvas.getBoundingClientRect();
+    var sx=t.clientX-rect.left, sy=t.clientY-rect.top;
+    var w=toWorld(sx,sy);
+    if(touchStartPos){
+      var dx=sx-touchStartPos.x, dy=sy-touchStartPos.y;
+      if(Math.abs(dx)>8||Math.abs(dy)>8) touchMoved=true;
+    }
+    if(state.isMoving&&state.selectedPitId){
+      var pit=state.pits.find(function(p){return p.id===state.selectedPitId;});
+      if(pit){
+        var newCx=w.x-state.moveOffset.x;
+        var newCy=w.y-state.moveOffset.y;
+        var snap=calcSnap(pit,newCx,newCy);
+        pit.cx=snap.cx;
+        pit.cy=snap.cy;
+        state.snapInfo=snap.guides.length?{guides:snap.guides}:null;
+        var si=document.getElementById('snapIndicator');
+        var st=document.getElementById('snapText');
+        if(snap.snapped){si.classList.remove('hidden');st.textContent=snap.guides.map(function(g){return g.label;}).join(', ');}
+        else{si.classList.add('hidden');}
+        render();
+      }
+    }else if(state.isDrawing){
+      state.drawPoints.push({x:sx,y:sy});
+      render();
+    }else if(!touchMoved&&touchStartPos){
+      var dx2=sx-touchStartPos.x, dy2=sy-touchStartPos.y;
+      state.canvasOffset.x+=dx2;
+      state.canvasOffset.y+=dy2;
+      touchStartPos={x:sx,y:sy};
+      render();
+    }
+  }else if(e.touches.length===2){
+    var t1=e.touches[0], t2=e.touches[1];
+    var dist=Math.hypot(t2.clientX-t1.clientX,t2.clientY-t1.clientY);
+    var scale=state.pinchStartScale*(dist/Math.max(1,state.pinchStartDist));
+    state.canvasScale=Math.max(0.1,Math.min(10,scale));
+    var center={x:(t1.clientX+t2.clientX)/2,y:(t1.clientY+t2.clientY)/2};
+    if(state.lastTouchCenter){
+      state.canvasOffset.x+=center.x-state.lastTouchCenter.x;
+      state.canvasOffset.y+=center.y-state.lastTouchCenter.y;
+    }
+    state.lastTouchCenter=center;
+    render();
+  }
+},{passive:false});
+
+canvas.addEventListener('touchend',function(e){
+  e.preventDefault();
+  if(state.isMoving){
+    state.isMoving=false;
+    state.snapInfo=null;
+    document.getElementById('snapIndicator').classList.add('hidden');
+    sendToRN({type:'pitsChanged',pits:getPitsSummary()});
+    return;
+  }
+  if(state.isDrawing&&state.drawPoints.length>=8){
+    var shape=recognizeShape(state.drawPoints);
+    if(shape){
+      var pit=createPit(shape.type,shape.cx,shape.cy,shape.type==='rect'?{width:shape.width,height:shape.height}:{diameter:shape.diameter});
+      state.selectedPitId=pit.id;
+      sendToRN({type:'pitSelected',id:pit.id,pit:pit});
+    }
+  }
+  state.isDrawing=false;
+  state.drawPoints=[];
+  render();
+},{passive:false});
+
+function zoomFit(){
+  if(state.pits.length===0){state.canvasOffset={x:0,y:0};state.canvasScale=1;render();return;}
+  var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(var i=0;i<state.pits.length;i++){
+    var b=getPitBounds(state.pits[i]);
+    minX=Math.min(minX,b.left-100);minY=Math.min(minY,b.top-100);
+    maxX=Math.max(maxX,b.right+100);maxY=Math.max(maxY,b.bottom+100);
+  }
+  var w=maxX-minX, h=maxY-minY;
+  state.canvasScale=Math.min(canvasW/w,canvasH/h)*0.85;
+  state.canvasOffset.x=-(minX+maxX)/2*state.canvasScale;
+  state.canvasOffset.y=-(minY+maxY)/2*state.canvasScale;
+  render();
+}
+
+function updatePitProp(id,prop,value){
+  var pit=state.pits.find(function(p){return p.id===id;});
+  if(pit){pit[prop]=value;pit.depth=pit.topElev-pit.bottomElev;render();sendToRN({type:'pitsChanged',pits:getPitsSummary()});}
+}
+
+function deletePit(id){
+  state.pits=state.pits.filter(function(p){return p.id!==id;});
+  if(state.selectedPitId===id) state.selectedPitId=null;
+  render();
+  sendToRN({type:'pitsChanged',pits:getPitsSummary()});
+}
+
+function selectPit(id){
+  state.selectedPitId=id;
+  var pit=state.pits.find(function(p){return p.id===id;});
+  if(pit) sendToRN({type:'pitSelected',id:id,pit:pit});
+  render();
+}
+
+function switchStep(step){
+  if(step>=2&&state.pits.length===0) return;
+  state.currentStep=step;
+  var hint=document.getElementById('drawModeHint');
+  if(step===1){
+    canvas.style.display='block';
+    document.getElementById('threeContainer').style.display='none';
+    if(hint) hint.style.display='block';
+    render();
+  }else if(step===2){
+    canvas.style.display='none';
+    document.getElementById('threeContainer').style.display='block';
+    if(hint) hint.style.display='none';
+    initThreeView();
+  }
+  sendToRN({type:'stepChanged',step:step});
+}
+
+function switchViewMode(mode){
+  var threeContainer=document.getElementById('threeContainer');
+  var pc=document.getElementById('planCanvas');
+  var sc=document.getElementById('sectionCanvas');
+  pc.style.display='none';
+  sc.style.display='none';
+  canvas.style.display='none';
+  if(mode==='3d'){
+    threeContainer.style.display='block';
+    if(threeRenderer) resizeThree();
+  }else if(mode==='plan'){
+    threeContainer.style.display='none';
+    drawPlanWithDimensions();
+    pc.style.display='block';
+    pc.style.position='absolute';
+    pc.style.top='0';
+    pc.style.left='0';
+    pc.style.width='100%';
+    pc.style.height='100%';
+  }else if(mode==='section'){
+    threeContainer.style.display='none';
+    sc.style.display='block';
+    sc.style.position='absolute';
+    sc.style.top='0';
+    sc.style.left='0';
+    sc.style.width='100%';
+    sc.style.height='100%';
+  }
+}
+
+var threeScene, threeCamera, threeRenderer, threeControls;
+
+function initThreeView(){
+  var container=document.getElementById('threeContainer');
+  if(threeRenderer){
+    if(threeRenderer.domElement.parentNode!==container) container.appendChild(threeRenderer.domElement);
+    threeRenderer.setSize(container.clientWidth,container.clientHeight);
+    buildThreeScene();
+    return;
+  }
+  threeScene=new THREE.Scene();
+  threeScene.background=new THREE.Color(0x0f0f23);
+  threeCamera=new THREE.PerspectiveCamera(50,container.clientWidth/container.clientHeight,0.1,1000000);
+  threeCamera.position.set(400,300,600);
+  threeRenderer=new THREE.WebGLRenderer({antialias:true});
+  threeRenderer.setSize(container.clientWidth,container.clientHeight);
+  container.appendChild(threeRenderer.domElement);
+  threeControls=new THREE.OrbitControls(threeCamera,threeRenderer.domElement);
+  threeControls.target.set(0,-100,0);
+  threeControls.update();
+  var light1=new THREE.DirectionalLight(0xffffff,1);
+  light1.position.set(200,400,300);
+  threeScene.add(light1);
+  var light2=new THREE.AmbientLight(0x404040,2);
+  threeScene.add(light2);
+  buildThreeScene();
+  animateThree();
+}
+
+function getSlabBounds(){
+  var minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
+  for(var i=0;i<state.pits.length;i++){
+    var p=state.pits[i];
+    var b=getPitBounds(p);
+    var ext=p.wallThk+p.membraneThk;
+    minX=Math.min(minX,b.left-ext);minZ=Math.min(minZ,b.top-ext);
+    maxX=Math.max(maxX,b.right+ext);maxZ=Math.max(maxZ,b.bottom+ext);
+  }
+  var margin=state.slabThickness;
+  minX-=margin;minZ-=margin;maxX+=margin;maxZ+=margin;
+  return {minX:minX,minZ:minZ,maxX:maxX,maxZ:maxZ,slabW:maxX-minX,slabD:maxZ-minZ,slabCx:(minX+maxX)/2,slabCz:(minZ+maxZ)/2};
+}
+
+var CLIPPER_SCALE=1000;
+
+function pitToClipperPath(pit){
+  var pts=[];
+  if(pit.type==='rect'){
+    var hw=pit.width/2,hh=pit.height/2;
+    pts.push({X:Math.round((pit.cx-hw)*CLIPPER_SCALE),Y:Math.round((pit.cy-hh)*CLIPPER_SCALE)});
+    pts.push({X:Math.round((pit.cx+hw)*CLIPPER_SCALE),Y:Math.round((pit.cy-hh)*CLIPPER_SCALE)});
+    pts.push({X:Math.round((pit.cx+hw)*CLIPPER_SCALE),Y:Math.round((pit.cy+hh)*CLIPPER_SCALE)});
+    pts.push({X:Math.round((pit.cx-hw)*CLIPPER_SCALE),Y:Math.round((pit.cy+hh)*CLIPPER_SCALE)});
+  }else{
+    var r=pit.diameter/2;
+    var seg=48;
+    for(var i=0;i<seg;i++){
+      var a=(i/seg)*Math.PI*2;
+      pts.push({X:Math.round((pit.cx+Math.cos(a)*r)*CLIPPER_SCALE),Y:Math.round((pit.cy+Math.sin(a)*r)*CLIPPER_SCALE)});
+    }
+  }
+  return pts;
+}
+
+function clipperUnion(pathsArr){
+  if(pathsArr.length===0) return [];
+  var co=new ClipperLib.Clipper();
+  for(var i=0;i<pathsArr.length;i++) co.AddPath(pathsArr[i],ClipperLib.PolyType.ptSubject,true);
+  var solution=new ClipperLib.Paths();
+  co.Execute(ClipperLib.ClipType.ctUnion,solution,ClipperLib.PolyFillType.pftNonZero,ClipperLib.PolyFillType.pftNonZero);
+  return solution;
+}
+
+function clipperOffset(paths,delta){
+  var co=new ClipperLib.ClipperOffset();
+  for(var i=0;i<paths.length;i++) co.AddPath(paths[i],ClipperLib.JoinType.jtMiter,ClipperLib.EndType.etClosedPolygon);
+  var solution=new ClipperLib.Paths();
+  co.Execute(solution,delta*CLIPPER_SCALE);
+  return solution;
+}
+
+function clipperDifference(subjectPaths,clipPaths){
+  var co=new ClipperLib.Clipper();
+  for(var i=0;i<subjectPaths.length;i++) co.AddPath(subjectPaths[i],ClipperLib.PolyType.ptSubject,true);
+  for(var i=0;i<clipPaths.length;i++) co.AddPath(clipPaths[i],ClipperLib.PolyType.ptClip,true);
+  var solution=new ClipperLib.Paths();
+  co.Execute(ClipperLib.ClipType.ctDifference,solution,ClipperLib.PolyFillType.pftNonZero,ClipperLib.PolyFillType.pftNonZero);
+  return solution;
+}
+
+function clipperPathsToShape(paths){
+  var shapes=[];
+  for(var i=0;i<paths.length;i++){
+    var path=paths[i];
+    if(path.length<3) continue;
+    var shape=new THREE.Shape();
+    shape.moveTo(path[0].X/CLIPPER_SCALE,path[0].Y/CLIPPER_SCALE);
+    for(var j=1;j<path.length;j++) shape.lineTo(path[j].X/CLIPPER_SCALE,path[j].Y/CLIPPER_SCALE);
+    shape.lineTo(path[0].X/CLIPPER_SCALE,path[0].Y/CLIPPER_SCALE);
+    shapes.push(shape);
+  }
+  return shapes;
+}
+
+function clipperIntersects(pathsA,pathsB){
+  var co=new ClipperLib.Clipper();
+  for(var i=0;i<pathsA.length;i++) co.AddPath(pathsA[i],ClipperLib.PolyType.ptSubject,true);
+  for(var i=0;i<pathsB.length;i++) co.AddPath(pathsB[i],ClipperLib.PolyType.ptClip,true);
+  var solution=new ClipperLib.Paths();
+  co.Execute(ClipperLib.ClipType.ctIntersection,solution,ClipperLib.PolyFillType.pftNonZero,ClipperLib.PolyFillType.pftNonZero);
+  return solution.length>0;
+}
+
+function buildThreeScene(){
+  while(threeScene.children.length>2) threeScene.remove(threeScene.children[2]);
+  var slabThk=state.slabThickness;
+  var slabMemThk=state.slabMembraneThk;
+  var sb=getSlabBounds();
+  var CONCRETE_COLOR=0x4a8fe7;
+  var MEMBRANE_COLOR=0xffc107;
+  var CAVITY_COLOR=0x0f0f23;
+  var membraneGeos=[];
+  var concreteGeos=[];
+  var cavityGeos=[];
+
+  if(state.pits.length===0){
+    var slabGeo=new THREE.BoxGeometry(sb.slabW,slabThk,sb.slabD);
+    slabGeo.translate(sb.slabCx,-slabThk/2,sb.slabCz);
+    concreteGeos.push(slabGeo);
+    var slabMemGeo=new THREE.BoxGeometry(sb.slabW,slabMemThk,sb.slabD);
+    slabMemGeo.translate(sb.slabCx,-slabThk-slabMemThk/2,sb.slabCz);
+    membraneGeos.push(slabMemGeo);
+  }else{
+    for(var i=0;i<state.pits.length;i++){
+      var pit=state.pits[i];
+      var cavityPath=[pitToClipperPath(pit)];
+      var concreteOutline=clipperOffset(cavityPath,pit.wallThk);
+      var membraneOutline=clipperOffset(concreteOutline,pit.membraneThk);
+      var membraneInner=clipperOffset(concreteOutline,-1);
+      var depthMm=Math.abs(pit.topElev-pit.bottomElev)*1000;
+      var pitDepth=depthMm-slabThk;
+
+      for(var j=0;j<clipperPathsToShape(cavityPath).length;j++){
+        var geo=new THREE.ExtrudeGeometry(clipperPathsToShape(cavityPath)[j],{depth:depthMm,bevelEnabled:false});
+        geo.rotateX(-Math.PI/2);geo.translate(0,-depthMm,0);
+        cavityGeos.push(geo);
+      }
+      var concreteShell=clipperDifference(concreteOutline,cavityPath);
+      for(var j=0;j<clipperPathsToShape(concreteShell).length;j++){
+        var geo=new THREE.ExtrudeGeometry(clipperPathsToShape(concreteShell)[j],{depth:pitDepth,bevelEnabled:false});
+        geo.rotateX(-Math.PI/2);geo.translate(0,-slabThk-pitDepth,0);
+        concreteGeos.push(geo);
+      }
+      for(var j=0;j<concreteOutline.length;j++){
+        var shape=clipperPathsToShape([concreteOutline[j]])[0];
+        if(!shape) continue;
+        var geo=new THREE.ExtrudeGeometry(shape,{depth:pit.bottomThk,bevelEnabled:false});
+        geo.rotateX(-Math.PI/2);geo.translate(0,-depthMm-pit.bottomThk,0);
+        concreteGeos.push(geo);
+      }
+      var membraneShell=clipperDifference(membraneOutline,membraneInner);
+      for(var j=0;j<clipperPathsToShape(membraneShell).length;j++){
+        var geo=new THREE.ExtrudeGeometry(clipperPathsToShape(membraneShell)[j],{depth:pitDepth+pit.bottomThk,bevelEnabled:false});
+        geo.rotateX(-Math.PI/2);geo.translate(0,-slabThk-pitDepth-pit.bottomThk,0);
+        membraneGeos.push(geo);
+      }
+      for(var j=0;j<membraneOutline.length;j++){
+        var shape=clipperPathsToShape([membraneOutline[j]])[0];
+        if(!shape) continue;
+        var geo=new THREE.ExtrudeGeometry(shape,{depth:pit.bottomMembraneThk,bevelEnabled:false});
+        geo.rotateX(-Math.PI/2);geo.translate(0,-depthMm-pit.bottomThk-pit.bottomMembraneThk,0);
+        membraneGeos.push(geo);
+      }
+    }
+    var allCavityPaths=clipperUnion(state.pits.map(function(p){return pitToClipperPath(p);}));
+    var allConcreteRaw=[];
+    var allMembraneRaw=[];
+    for(var i=0;i<state.pits.length;i++){
+      var p=state.pits[i];
+      var cp=clipperOffset([pitToClipperPath(p)],p.wallThk);
+      for(var j=0;j<cp.length;j++) allConcreteRaw.push(cp[j]);
+      var mp=clipperOffset(clipperOffset([pitToClipperPath(p)],p.wallThk),p.membraneThk);
+      for(var j=0;j<mp.length;j++) allMembraneRaw.push(mp[j]);
+    }
+    var allConcretePaths=clipperUnion(allConcreteRaw);
+    var allMembranePaths=clipperUnion(allMembraneRaw);
+    var allMembraneInner=clipperOffset(allConcretePaths,-1);
+
+    var slabShape=new THREE.Shape();
+    slabShape.moveTo(sb.minX,sb.minZ);slabShape.lineTo(sb.maxX,sb.minZ);
+    slabShape.lineTo(sb.maxX,sb.maxZ);slabShape.lineTo(sb.minX,sb.maxZ);
+    slabShape.lineTo(sb.minX,sb.minZ);
+    for(var i=0;i<allCavityPaths.length;i++){
+      var cp=allCavityPaths[i];
+      if(cp.length<3) continue;
+      var hole=new THREE.Path();
+      hole.moveTo(cp[0].X/CLIPPER_SCALE,cp[0].Y/CLIPPER_SCALE);
+      for(var j=1;j<cp.length;j++) hole.lineTo(cp[j].X/CLIPPER_SCALE,cp[j].Y/CLIPPER_SCALE);
+      hole.lineTo(cp[0].X/CLIPPER_SCALE,cp[0].Y/CLIPPER_SCALE);
+      slabShape.holes.push(hole);
+    }
+    var slabGeo=new THREE.ExtrudeGeometry(slabShape,{depth:slabThk,bevelEnabled:false});
+    slabGeo.rotateX(-Math.PI/2);slabGeo.translate(0,-slabThk,0);
+    concreteGeos.push(slabGeo);
+
+    var slabMemShape=new THREE.Shape();
+    slabMemShape.moveTo(sb.minX,sb.minZ);slabMemShape.lineTo(sb.maxX,sb.minZ);
+    slabMemShape.lineTo(sb.maxX,sb.maxZ);slabMemShape.lineTo(sb.minX,sb.maxZ);
+    slabMemShape.lineTo(sb.minX,sb.minZ);
+    for(var i=0;i<allMembraneInner.length;i++){
+      var cp=allMembraneInner[i];
+      if(cp.length<3) continue;
+      var hole=new THREE.Path();
+      hole.moveTo(cp[0].X/CLIPPER_SCALE,cp[0].Y/CLIPPER_SCALE);
+      for(var j=1;j<cp.length;j++) hole.lineTo(cp[j].X/CLIPPER_SCALE,cp[j].Y/CLIPPER_SCALE);
+      hole.lineTo(cp[0].X/CLIPPER_SCALE,cp[0].Y/CLIPPER_SCALE);
+      slabMemShape.holes.push(hole);
+    }
+    var slabMemGeo=new THREE.ExtrudeGeometry(slabMemShape,{depth:slabMemThk,bevelEnabled:false});
+    slabMemGeo.rotateX(-Math.PI/2);slabMemGeo.translate(0,-slabThk-slabMemThk,0);
+    membraneGeos.push(slabMemGeo);
+  }
+
+  var membraneMat=new THREE.MeshPhongMaterial({color:MEMBRANE_COLOR,transparent:true,opacity:0.4,side:THREE.DoubleSide,depthWrite:false});
+  var concreteMat=new THREE.MeshPhongMaterial({color:CONCRETE_COLOR,transparent:true,opacity:1.0,side:THREE.DoubleSide,depthWrite:true});
+  var cavityMat=new THREE.MeshPhongMaterial({color:CAVITY_COLOR,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false});
+
+  if(membraneGeos.length>0){var merged=mergeGeometries(membraneGeos);if(merged){var mesh=new THREE.Mesh(merged,membraneMat);mesh.renderOrder=0;threeScene.add(mesh);}}
+  if(concreteGeos.length>0){var merged=mergeGeometries(concreteGeos);if(merged){var mesh=new THREE.Mesh(merged,concreteMat);mesh.renderOrder=1;threeScene.add(mesh);}}
+  if(cavityGeos.length>0){var merged=mergeGeometries(cavityGeos);if(merged){var mesh=new THREE.Mesh(merged,cavityMat);mesh.renderOrder=2;threeScene.add(mesh);}}
+
+  var sceneBox=new THREE.Box3();
+  for(var i=2;i<threeScene.children.length;i++) sceneBox.expandByObject(threeScene.children[i]);
+  var sceneCenter=new THREE.Vector3();
+  sceneBox.getCenter(sceneCenter);
+  var sceneSize=new THREE.Vector3();
+  sceneBox.getSize(sceneSize);
+  var maxDim=Math.max(sceneSize.x,sceneSize.y,sceneSize.z);
+  var dist=maxDim*1.8;
+  threeControls.target.copy(sceneCenter);
+  threeCamera.position.set(sceneCenter.x+dist*0.6,sceneCenter.y+dist*0.5,sceneCenter.z+dist*0.8);
+  threeControls.update();
+}
+
+function animateThree(){
+  requestAnimationFrame(animateThree);
+  if(threeRenderer&&threeScene&&threeCamera){
+    threeControls&&threeControls.update();
+    threeRenderer.render(threeScene,threeCamera);
+  }
+}
+
+function resizeThree(){
+  if(!threeRenderer) return;
+  var container=document.getElementById('threeContainer');
+  if(container.clientWidth===0) return;
+  threeRenderer.setSize(container.clientWidth,container.clientHeight);
+  threeCamera.aspect=container.clientWidth/container.clientHeight;
+  threeCamera.updateProjectionMatrix();
+}
+
+function exportDXF(){
+  var dxf='';
+  dxf+='0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n';
+  dxf+='0\nSECTION\n2\nTABLES\n';
+  dxf+='0\nTABLE\n2\nLTYPE\n70\n3\n';
+  dxf+='0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nContinuous\n72\n65\n73\n0\n40\n0\n';
+  dxf+='0\nLTYPE\n2\nDASHED\n70\n0\n3\nDashed\n72\n65\n73\n1\n40\n5\n49\n3\n49\n-2\n';
+  dxf+='0\nENDTAB\n';
+  dxf+='0\nTABLE\n2\nLAYER\n70\n6\n';
+  dxf+='0\nLAYER\n2\nPIT_OUTLINE\n70\n0\n62\n1\n6\nCONTINUOUS\n';
+  dxf+='0\nLAYER\n2\nPIT_WALL\n70\n0\n62\n5\n6\nDASHED\n';
+  dxf+='0\nLAYER\n2\nPIT_MEMBRANE\n70\n0\n62\n3\n6\nDASHED\n';
+  dxf+='0\nLAYER\n2\nDIMENSION\n70\n0\n62\n1\n6\nCONTINUOUS\n';
+  dxf+='0\nLAYER\n2\nELEVATION\n70\n0\n62\n5\n6\nCONTINUOUS\n';
+  dxf+='0\nLAYER\n2\nSECTION_CONCRETE\n70\n0\n62\n5\n6\nCONTINUOUS\n';
+  dxf+='0\nLAYER\n2\nSECTION_MEMBRANE\n70\n0\n62\n3\n6\nCONTINUOUS\n';
+  dxf+='0\nLAYER\n2\nSECTION_CAVITY\n70\n0\n62\n7\n6\nCONTINUOUS\n';
+  dxf+='0\nLAYER\n2\nTEXT\n70\n0\n62\n7\n6\nCONTINUOUS\n';
+  dxf+='0\nENDTAB\n';
+  dxf+='0\nENDSEC\n';
+
+  dxf+='0\nSECTION\n2\nENTITIES\n';
+
+  var planOffsetY=0;
+  var sectionOffsetY=-50000;
+
+  for(var i=0;i<state.pits.length;i++){
+    var pit=state.pits[i];
+    if(pit.type==='rect'){
+      var b=getPitBounds(pit);
+      dxf+='0\nLWPOLYLINE\n8\nPIT_OUTLINE\n90\n4\n70\n1\n';
+      dxf+='10\n'+b.left+'\n20\n'+(b.top+planOffsetY)+'\n10\n'+b.right+'\n20\n'+(b.top+planOffsetY)+'\n10\n'+b.right+'\n20\n'+(b.bottom+planOffsetY)+'\n10\n'+b.left+'\n20\n'+(b.bottom+planOffsetY)+'\n';
+      var wallExt=pit.wallThk;
+      dxf+='0\nLWPOLYLINE\n8\nPIT_WALL\n90\n4\n70\n1\n';
+      dxf+='10\n'+(b.left-wallExt)+'\n20\n'+(b.top-wallExt+planOffsetY)+'\n10\n'+(b.right+wallExt)+'\n20\n'+(b.top-wallExt+planOffsetY)+'\n10\n'+(b.right+wallExt)+'\n20\n'+(b.bottom+wallExt+planOffsetY)+'\n10\n'+(b.left-wallExt)+'\n20\n'+(b.bottom+wallExt+planOffsetY)+'\n';
+      var memExt=pit.wallThk+pit.membraneThk;
+      dxf+='0\nLWPOLYLINE\n8\nPIT_MEMBRANE\n90\n4\n70\n1\n';
+      dxf+='10\n'+(b.left-memExt)+'\n20\n'+(b.top-memExt+planOffsetY)+'\n10\n'+(b.right+memExt)+'\n20\n'+(b.top-memExt+planOffsetY)+'\n10\n'+(b.right+memExt)+'\n20\n'+(b.bottom+memExt+planOffsetY)+'\n10\n'+(b.left-memExt)+'\n20\n'+(b.bottom+memExt+planOffsetY)+'\n';
+      dxf+='0\nTEXT\n8\nTEXT\n10\n'+pit.cx+'\n20\n'+(b.top-500+planOffsetY)+'\n40\n200\n1\n'+pit.name+'\n';
+      dxf+=dxfDimLine(b.left,b.top-800,b.right,b.top-800,pit.width+'',planOffsetY);
+      dxf+=dxfDimLine(b.left-800,b.top,b.left-800,b.bottom,pit.height+'',planOffsetY);
+    }else{
+      var r=pit.diameter/2;
+      dxf+='0\nCIRCLE\n8\nPIT_OUTLINE\n10\n'+pit.cx+'\n20\n'+(pit.cy+planOffsetY)+'\n40\n'+r+'\n';
+      dxf+='0\nCIRCLE\n8\nPIT_WALL\n10\n'+pit.cx+'\n20\n'+(pit.cy+planOffsetY)+'\n40\n'+(r+pit.wallThk)+'\n';
+      dxf+='0\nCIRCLE\n8\nPIT_MEMBRANE\n10\n'+pit.cx+'\n20\n'+(pit.cy+planOffsetY)+'\n40\n'+(r+pit.wallThk+pit.membraneThk)+'\n';
+      dxf+='0\nLINE\n8\nDIMENSION\n10\n'+pit.cx+'\n20\n'+(pit.cy+planOffsetY)+'\n11\n'+(pit.cx+r)+'\n21\n'+(pit.cy+planOffsetY)+'\n';
+      dxf+='0\nTEXT\n8\nTEXT\n10\n'+(pit.cx+r/2)+'\n20\n'+(pit.cy-300+planOffsetY)+'\n40\n200\n1\n⌀'+pit.diameter+'\n';
+      dxf+='0\nTEXT\n8\nTEXT\n10\n'+pit.cx+'\n20\n'+(pit.cy-r-500+planOffsetY)+'\n40\n200\n1\n'+pit.name+'\n';
+    }
+  }
+
+  dxf+='0\nTEXT\n8\nTEXT\n10\n0\n20\n'+(planOffsetY+2000)+'\n40\n400\n1\n平面图\n';
+
+  var slabThk=state.slabThickness;
+  var slabMemThk=state.slabMembraneThk;
+  var allCavityRaw=[];
+  var allConcreteRaw=[];
+  var allMembraneRaw=[];
+  var pitDepths=[];
+  for(var i=0;i<state.pits.length;i++){
+    var pit=state.pits[i];
+    var cavityPath=[pitToClipperPath(pit)];
+    var concreteOutline=clipperOffset(cavityPath,pit.wallThk);
+    var membraneOutline=clipperOffset(concreteOutline,pit.membraneThk);
+    for(var j=0;j<cavityPath.length;j++) allCavityRaw.push(cavityPath[j]);
+    for(var j=0;j<concreteOutline.length;j++) allConcreteRaw.push(concreteOutline[j]);
+    for(var j=0;j<membraneOutline.length;j++) allMembraneRaw.push(membraneOutline[j]);
+    var depthMm=Math.abs(pit.topElev-pit.bottomElev)*1000;
+    pitDepths.push({pit:pit,depthMm:depthMm});
+  }
+  var allCavityPaths=allCavityRaw.length>0?clipperUnion(allCavityRaw):[];
+  var allConcretePaths=allConcreteRaw.length>0?clipperUnion(allConcreteRaw):[];
+  var allMembranePaths=allMembraneRaw.length>0?clipperUnion(allMembraneRaw):[];
+
+  var maxPitDepth=0;
+  var maxBottomThk=0;
+  var maxBottomMemThk=0;
+  var maxDepthMm=0;
+  for(var i=0;i<pitDepths.length;i++){
+    var pd=pitDepths[i];
+    var pitDepth=pd.depthMm-slabThk;
+    maxPitDepth=Math.max(maxPitDepth,pitDepth);
+    maxBottomThk=Math.max(maxBottomThk,pd.pit.bottomThk);
+    maxBottomMemThk=Math.max(maxBottomMemThk,pd.pit.bottomMembraneThk);
+    maxDepthMm=Math.max(maxDepthMm,pd.depthMm+pd.pit.bottomThk+pd.pit.bottomMembraneThk);
+  }
+
+  var sb=getSlabBounds();
+  var slabLeft=sb.minX;
+  var slabRight=sb.maxX;
+  var sY=sectionOffsetY;
+  var slabTopY=sY;
+  var slabBottomY=sY-slabThk;
+  var slabMemBottomY=slabBottomY-slabMemThk;
+  var pitBottomY=slabBottomY-maxPitDepth;
+  var pitFloorBottomY=pitBottomY-maxBottomThk;
+  var pitFloorMemBottomY=pitFloorBottomY-maxBottomMemThk;
+
+  dxf+='0\nLWPOLYLINE\n8\nSECTION_CONCRETE\n90\n4\n70\n1\n';
+  dxf+='10\n'+slabLeft+'\n20\n'+slabTopY+'\n10\n'+slabRight+'\n20\n'+slabTopY+'\n10\n'+slabRight+'\n20\n'+pitFloorBottomY+'\n10\n'+slabLeft+'\n20\n'+pitFloorBottomY+'\n';
+
+  dxf+='0\nLWPOLYLINE\n8\nSECTION_MEMBRANE\n90\n4\n70\n1\n';
+  dxf+='10\n'+slabLeft+'\n20\n'+slabBottomY+'\n10\n'+slabRight+'\n20\n'+slabBottomY+'\n10\n'+slabRight+'\n20\n'+pitFloorMemBottomY+'\n10\n'+slabLeft+'\n20\n'+pitFloorMemBottomY+'\n';
+
+  for(var i=0;i<allCavityPaths.length;i++){
+    var path=allCavityPaths[i];
+    if(path.length<3) continue;
+    var minX=Infinity,maxX=-Infinity;
+    for(var j=0;j<path.length;j++){
+      var x=path[j].X/CLIPPER_SCALE;
+      minX=Math.min(minX,x);
+      maxX=Math.max(maxX,x);
+    }
+    dxf+='0\nLWPOLYLINE\n8\nSECTION_CAVITY\n90\n4\n70\n1\n';
+    dxf+='10\n'+minX+'\n20\n'+slabTopY+'\n10\n'+maxX+'\n20\n'+slabTopY+'\n10\n'+maxX+'\n20\n'+pitBottomY+'\n10\n'+minX+'\n20\n'+pitBottomY+'\n';
+  }
+
+  dxf+='0\nTEXT\n8\nTEXT\n10\n'+((slabLeft+slabRight)/2)+'\n20\n'+(slabTopY+1500)+'\n40\n400\n1\n1-1 剖面图\n';
+  dxf+='0\nTEXT\n8\nDIMENSION\n10\n'+(slabLeft+200)+'\n20\n'+((slabTopY+slabBottomY)/2)+'\n40\n200\n1\n底板 '+slabThk+'mm\n';
+  dxf+='0\nTEXT\n8\nDIMENSION\n10\n'+(slabLeft+200)+'\n20\n'+((slabBottomY+slabMemBottomY)/2)+'\n40\n200\n1\n底膜 '+slabMemThk+'mm\n';
+
+  for(var i=0;i<pitDepths.length;i++){
+    var pd=pitDepths[i];
+    var pit=pd.pit;
+    var b=getPitBounds(pit);
+    dxf+='0\nTEXT\n8\nTEXT\n10\n'+pit.cx+'\n20\n'+((slabBottomY+pitBottomY)/2)+'\n40\n200\n1\n'+pit.name+'\n';
+  }
+
+  dxf+=dxfDimLine(slabRight+1000,slabTopY,slabRight+1000,pitFloorMemBottomY,maxDepthMm+'mm',0);
+  dxf+='0\nTEXT\n8\nELEVATION\n10\n'+(slabLeft-2000)+'\n20\n'+(slabTopY+200)+'\n40\n200\n1\n'+(state.pits.length>0?state.pits[0].topElev.toFixed(2):'0.00')+'m\n';
+  dxf+='0\nTEXT\n8\nELEVATION\n10\n'+(slabLeft-2000)+'\n20\n'+(pitFloorMemBottomY+200)+'\n40\n200\n1\n'+(state.pits.length>0?state.pits[0].bottomElev.toFixed(2):'0.00')+'m\n';
+
+  dxf+='0\nENDSEC\n0\nEOF\n';
+  sendToRN({type:'exportResult',format:'DXF',data:dxf});
+}
+
+function dxfDimLine(x1,y1,x2,y2,label,offsetY){
+  var dxf='';
+  var isH=Math.abs(y1-y2)<1;
+  dxf+='0\nLINE\n8\nDIMENSION\n10\n'+x1+'\n20\n'+y1+'\n11\n'+x2+'\n21\n'+y2+'\n';
+  if(isH){
+    dxf+='0\nLINE\n8\nDIMENSION\n10\n'+x1+'\n20\n'+y1+'\n11\n'+(x1+150)+'\n21\n'+(y1+100)+'\n';
+    dxf+='0\nLINE\n8\nDIMENSION\n10\n'+x1+'\n20\n'+y1+'\n11\n'+(x1+150)+'\n21\n'+(y1-100)+'\n';
+    dxf+='0\nLINE\n8\nDIMENSION\n10\n'+x2+'\n20\n'+y2+'\n11\n'+(x2-150)+'\n21\n'+(y2+100)+'\n';
+    dxf+='0\nLINE\n8\nDIMENSION\n10\n'+x2+'\n20\n'+y2+'\n11\n'+(x2-150)+'\n21\n'+(y2-100)+'\n';
+    dxf+='0\nTEXT\n8\nDIMENSION\n10\n'+((x1+x2)/2)+'\n20\n'+(y1+300)+'\n40\n200\n1\n'+label+'\n';
+  }else{
+    dxf+='0\nLINE\n8\nDIMENSION\n10\n'+x1+'\n20\n'+y1+'\n11\n'+(x1+100)+'\n21\n'+(y1-150)+'\n';
+    dxf+='0\nLINE\n8\nDIMENSION\n10\n'+x1+'\n20\n'+y1+'\n11\n'+(x1-100)+'\n21\n'+(y1-150)+'\n';
+    dxf+='0\nLINE\n8\nDIMENSION\n10\n'+x2+'\n20\n'+y2+'\n11\n'+(x2+100)+'\n21\n'+(y2+150)+'\n';
+    dxf+='0\nLINE\n8\nDIMENSION\n10\n'+x2+'\n20\n'+y2+'\n11\n'+(x2-100)+'\n21\n'+(y2+150)+'\n';
+    dxf+='0\nTEXT\n8\nDIMENSION\n10\n'+(x1-800)+'\n20\n'+((y1+y2)/2)+'\n40\n200\n1\n'+label+'\n';
+  }
+  return dxf;
+}
+
+function exportPNG(){
+  drawPlanWithDimensions();
+  drawSectionDrawing();
+  var pc=document.getElementById('planCanvas');
+  var sc=document.getElementById('sectionCanvas');
+  var gap=40*devicePixelRatio;
+  var expCanvas=document.createElement('canvas');
+  expCanvas.width=pc.width+sc.width+gap*3;
+  expCanvas.height=Math.max(pc.height,sc.height)+gap*2;
+  var ectx=expCanvas.getContext('2d');
+  ectx.fillStyle='#fff';
+  ectx.fillRect(0,0,expCanvas.width,expCanvas.height);
+  ectx.drawImage(pc,gap,gap);
+  ectx.drawImage(sc,pc.width+gap*2,gap);
+  var url=expCanvas.toDataURL('image/png');
+  sendToRN({type:'exportResult',format:'PNG',data:url});
+}
+
+function drawPlanWithDimensions(){
+  var pc=document.getElementById('planCanvas');
+  var pctx=pc.getContext('2d');
+  var pw=600,ph=400;
+  pc.width=pw*devicePixelRatio;
+  pc.height=ph*devicePixelRatio;
+  pc.style.width=pw+'px';
+  pc.style.height=ph+'px';
+  pctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  pctx.fillStyle='#0f0f23';
+  pctx.fillRect(0,0,pw,ph);
+  if(state.pits.length===0) return;
+  var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(var i=0;i<state.pits.length;i++){
+    var p=state.pits[i];
+    var b=getPitBounds(p);
+    var ext=p.wallThk+p.membraneThk+200;
+    minX=Math.min(minX,b.left-ext);minY=Math.min(minY,b.top-ext);
+    maxX=Math.max(maxX,b.right+ext);maxY=Math.max(maxY,b.bottom+ext);
+  }
+  var ww=maxX-minX,wh=maxY-minY;
+  var scale=Math.min(pw/ww,ph/wh)*0.7;
+  var ox=pw/2-(minX+maxX)/2*scale;
+  var oy=ph/2-(minY+maxY)/2*scale;
+
+  for(var i=0;i<state.pits.length;i++){
+    var pit=state.pits[i];
+    var sx=ox+pit.cx*scale;
+    var sy=oy+pit.cy*scale;
+    if(pit.type==='rect'){
+      var sw=pit.width*scale,sh=pit.height*scale;
+      pctx.fillStyle='rgba(15,52,96,0.5)';
+      pctx.strokeStyle='#e94560';
+      pctx.lineWidth=1.5;
+      pctx.fillRect(sx-sw/2,sy-sh/2,sw,sh);
+      pctx.strokeRect(sx-sw/2,sy-sh/2,sw,sh);
+      var wallPx=pit.wallThk*scale;
+      var memPx=pit.membraneThk*scale;
+      pctx.strokeStyle='rgba(233,69,96,0.3)';
+      pctx.lineWidth=0.5;
+      pctx.setLineDash([3,3]);
+      pctx.strokeRect(sx-sw/2-wallPx,sy-sh/2-wallPx,sw+2*wallPx,sh+2*wallPx);
+      pctx.strokeRect(sx-sw/2-wallPx-memPx,sy-sh/2-wallPx-memPx,sw+2*(wallPx+memPx),sh+2*(wallPx+memPx));
+      pctx.setLineDash([]);
+      drawCanvasDimLine(pctx,sx-sw/2,sy-sh/2-25,sx+sw/2,sy-sh/2-25,pit.width+'','#e94560');
+      drawCanvasDimLine(pctx,sx-sw/2-25,sy-sh/2,sx-sw/2-25,sy+sh/2,pit.height+'','#e94560');
+    }else{
+      var sr=pit.diameter/2*scale;
+      pctx.fillStyle='rgba(15,52,96,0.5)';
+      pctx.strokeStyle='#e94560';
+      pctx.lineWidth=1.5;
+      pctx.beginPath();pctx.arc(sx,sy,sr,0,Math.PI*2);pctx.fill();pctx.stroke();
+      pctx.strokeStyle='rgba(233,69,96,0.3)';
+      pctx.lineWidth=0.5;
+      pctx.setLineDash([3,3]);
+      pctx.beginPath();pctx.arc(sx,sy,sr+pit.wallThk*scale,0,Math.PI*2);pctx.stroke();
+      pctx.beginPath();pctx.arc(sx,sy,sr+(pit.wallThk+pit.membraneThk)*scale,0,Math.PI*2);pctx.stroke();
+      pctx.setLineDash([]);
+      pctx.beginPath();pctx.moveTo(sx,sy);pctx.lineTo(sx+sr,sy);pctx.strokeStyle='#e94560';pctx.lineWidth=1;pctx.stroke();
+      pctx.fillStyle='#e94560';pctx.font='10px sans-serif';pctx.textAlign='center';
+      pctx.fillText('\u2300'+pit.diameter,sx+sr/2,sy-8);
+    }
+    pctx.fillStyle='#e94560';pctx.font='bold 11px sans-serif';pctx.textAlign='center';
+    var labelY=pit.type==='rect'?sy-pit.height/2*scale-8:sy-pit.diameter/2*scale-8;
+    pctx.fillText(pit.name,sx,labelY);
+  }
+
+  pctx.fillStyle='#e0e0e0';pctx.font='bold 12px sans-serif';pctx.textAlign='center';
+  pctx.fillText('\u5E73\u9762\u56FE',pw/2,16);
+}
+
+function drawCanvasDimLine(ctx,x1,y1,x2,y2,label,color){
+  ctx.strokeStyle=color;
+  ctx.fillStyle=color;
+  ctx.lineWidth=0.8;
+  ctx.font='10px sans-serif';
+  var isH=Math.abs(y1-y2)<1;
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  var arrowLen=6;
+  if(isH){
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x1+arrowLen,y1-arrowLen/2);ctx.lineTo(x1+arrowLen,y1+arrowLen/2);ctx.fill();
+    ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-arrowLen,y2-arrowLen/2);ctx.lineTo(x2-arrowLen,y2+arrowLen/2);ctx.fill();
+    ctx.textAlign='center';
+    ctx.fillText(label,(x1+x2)/2,y1-4);
+  }else{
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x1-arrowLen/2,y1+arrowLen);ctx.lineTo(x1+arrowLen/2,y1+arrowLen);ctx.fill();
+    ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-arrowLen/2,y2-arrowLen);ctx.lineTo(x2+arrowLen/2,y2-arrowLen);ctx.fill();
+    ctx.save();ctx.translate((x1+x2)/2-4,(y1+y2)/2);ctx.rotate(-Math.PI/2);ctx.textAlign='center';ctx.fillText(label,0,0);ctx.restore();
+  }
+}
+
+function drawSectionDrawing(){
+  var sc=document.getElementById('sectionCanvas');
+  var sctx=sc.getContext('2d');
+  var sw=600,sh=400;
+  sc.width=sw*devicePixelRatio;
+  sc.height=sh*devicePixelRatio;
+  sc.style.width=sw+'px';
+  sc.style.height=sh+'px';
+  sctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  sctx.fillStyle='#0f0f23';
+  sctx.fillRect(0,0,sw,sh);
+  if(state.pits.length===0) return;
+
+  var slabThk=state.slabThickness;
+  var slabMemThk=state.slabMembraneThk;
+  var allCavityRaw=[];
+  var allConcreteRaw=[];
+  var allMembraneRaw=[];
+  var pitDepths=[];
+  for(var i=0;i<state.pits.length;i++){
+    var pit=state.pits[i];
+    var cavityPath=[pitToClipperPath(pit)];
+    var concreteOutline=clipperOffset(cavityPath,pit.wallThk);
+    var membraneOutline=clipperOffset(concreteOutline,pit.membraneThk);
+    for(var j=0;j<cavityPath.length;j++) allCavityRaw.push(cavityPath[j]);
+    for(var j=0;j<concreteOutline.length;j++) allConcreteRaw.push(concreteOutline[j]);
+    for(var j=0;j<membraneOutline.length;j++) allMembraneRaw.push(membraneOutline[j]);
+    var depthMm=Math.abs(pit.topElev-pit.bottomElev)*1000;
+    pitDepths.push({pit:pit,depthMm:depthMm});
+  }
+  var allCavityPaths=allCavityRaw.length>0?clipperUnion(allCavityRaw):[];
+  var allConcretePaths=allConcreteRaw.length>0?clipperUnion(allConcreteRaw):[];
+  var allMembranePaths=allMembraneRaw.length>0?clipperUnion(allMembraneRaw):[];
+
+  var maxPitDepth=0,maxBottomThk=0,maxBottomMemThk=0,maxDepthMm=0;
+  for(var i=0;i<pitDepths.length;i++){
+    var pd=pitDepths[i];
+    maxPitDepth=Math.max(maxPitDepth,pd.depthMm-slabThk);
+    maxBottomThk=Math.max(maxBottomThk,pd.pit.bottomThk);
+    maxBottomMemThk=Math.max(maxBottomMemThk,pd.pit.bottomMembraneThk);
+    maxDepthMm=Math.max(maxDepthMm,pd.depthMm+pd.pit.bottomThk+pd.pit.bottomMembraneThk);
+  }
+  if(maxDepthMm===0) maxDepthMm=slabThk+slabMemThk;
+
+  var sb=getSlabBounds();
+  var totalW=sb.slabW;
+  var totalH=maxDepthMm;
+  var pad=50;
+  var drawW=sw-pad*2;
+  var drawH=sh-pad*2;
+  var scale=Math.min(drawW/totalW,drawH/totalH)*0.8;
+  var slabTopY=sh/2-totalH/2*scale;
+  var slabH=slabThk*scale;
+  var slabMemH=slabMemThk*scale;
+  var slabBottomY=slabTopY+slabH;
+  var slabMemTopY=slabBottomY;
+  var pitDepthPx=maxPitDepth*scale;
+  var bottomThkPx=maxBottomThk*scale;
+  var bottomMemThkPx=maxBottomMemThk*scale;
+  var pitBottomY=slabBottomY+pitDepthPx;
+  var pitFloorBottomY=pitBottomY+bottomThkPx;
+  var pitFloorMemBottomY=pitFloorBottomY+bottomMemThkPx;
+  var slabLeftX=sw/2-totalW/2*scale;
+  var slabRightX=sw/2+totalW/2*scale;
+  var slabDrawW=slabRightX-slabLeftX;
+
+  function projToX(proj){
+    return Math.round(sw/2+(proj-sb.slabCx)*scale);
+  }
+
+  var CF='#4a8fe7';
+  var CF_FILL='rgba(106,170,240,0.6)';
+  var MF='#ffc107';
+  var MF_FILL='rgba(255,213,79,0.4)';
+  var BG='#0f0f23';
+
+  var cavityIntervals=clipperPathToProjections(allCavityPaths);
+  var concreteIntervals=clipperPathToProjections(allConcretePaths);
+  var membraneIntervals=clipperPathToProjections(allMembranePaths);
+
+  sctx.fillStyle=MF_FILL;
+  sctx.strokeStyle=MF;
+  sctx.lineWidth=1.5;
+  var slabMemHoles=subtractIntervals([{left:sb.minX,right:sb.maxX}],membraneIntervals);
+  for(var k=0;k<slabMemHoles.length;k++){
+    var seg=slabMemHoles[k];
+    var lx=projToX(seg.left),rx=projToX(seg.right);
+    sctx.fillRect(lx,slabMemTopY,rx-lx,slabMemH);
+    sctx.strokeRect(lx,slabMemTopY,rx-lx,slabMemH);
+  }
+  for(var k=0;k<membraneIntervals.length;k++){
+    var seg=membraneIntervals[k];
+    var lx=projToX(seg.left),rx=projToX(seg.right);
+    sctx.fillRect(lx,slabBottomY,rx-lx,pitDepthPx+bottomThkPx+bottomMemThkPx);
+    sctx.strokeRect(lx,slabBottomY,rx-lx,pitDepthPx+bottomThkPx+bottomMemThkPx);
+  }
+
+  sctx.fillStyle=CF_FILL;
+  sctx.strokeStyle=CF;
+  sctx.lineWidth=2;
+  var allConcreteBase=[{left:sb.minX,right:sb.maxX}];
+  var concreteBaseIntervals=subtractIntervals(allConcreteBase,cavityIntervals);
+  for(var k=0;k<concreteBaseIntervals.length;k++){
+    var seg=concreteBaseIntervals[k];
+    var lx=projToX(seg.left),rx=projToX(seg.right);
+    sctx.fillRect(lx,slabTopY,rx-lx,slabH);
+  }
+  for(var k=0;k<concreteIntervals.length;k++){
+    var seg=concreteIntervals[k];
+    var lx=projToX(seg.left),rx=projToX(seg.right);
+    sctx.fillRect(lx,slabBottomY,rx-lx,pitDepthPx+bottomThkPx);
+  }
+  if(concreteBaseIntervals.length>0){
+    var first=concreteBaseIntervals[0];
+    var last=concreteBaseIntervals[concreteBaseIntervals.length-1];
+    var flx=projToX(first.left),frx=projToX(last.right);
+    sctx.beginPath();
+    sctx.moveTo(flx,slabTopY);sctx.lineTo(frx,slabTopY);sctx.lineTo(frx,pitFloorBottomY);sctx.lineTo(flx,pitFloorBottomY);sctx.closePath();
+    sctx.stroke();
+  }
+
+  for(var k=0;k<cavityIntervals.length;k++){
+    var seg=cavityIntervals[k];
+    var lx=projToX(seg.left),rx=projToX(seg.right);
+    sctx.fillStyle=BG;
+    sctx.fillRect(lx,slabTopY,rx-lx,slabH+pitDepthPx);
+    sctx.strokeStyle=CF;
+    sctx.lineWidth=1;
+    sctx.beginPath();
+    sctx.moveTo(lx,slabTopY);sctx.lineTo(lx,pitBottomY);
+    sctx.moveTo(rx,slabTopY);sctx.lineTo(rx,pitBottomY);
+    sctx.stroke();
+  }
+  for(var k=0;k<cavityIntervals.length;k++){
+    var seg=cavityIntervals[k];
+    var lx=projToX(seg.left),rx=projToX(seg.right);
+    sctx.fillStyle=BG;
+    sctx.fillRect(lx,slabMemTopY,rx-lx,slabMemH);
+  }
+
+  sctx.fillStyle=CF;
+  sctx.font='10px sans-serif';
+  sctx.textAlign='left';
+  sctx.fillText('\u5E95\u677F '+slabThk+'mm',slabLeftX+4,slabTopY+slabH/2+4);
+  sctx.fillStyle=MF;
+  sctx.font='9px sans-serif';
+  sctx.fillText('\u5E95\u819C '+slabMemThk+'mm',slabLeftX+4,slabMemTopY+slabMemH/2+3);
+
+  for(var k=0;k<cavityIntervals.length;k++){
+    var seg=cavityIntervals[k];
+    var lx=projToX(seg.left),rx=projToX(seg.right);
+    var midX=(lx+rx)/2;
+    sctx.fillStyle='#e0e0e0';
+    sctx.font='bold 11px sans-serif';
+    sctx.textAlign='center';
+    for(var m=0;m<pitDepths.length;m++){
+      var pd=pitDepths[m];
+      var pitCavityPath=[pitToClipperPath(pd.pit)];
+      var pitCavInt=clipperPathToProjections(pitCavityPath);
+      if(pitCavInt.length>0&&pitCavInt[0].left>=seg.left-1&&pitCavInt[0].right<=seg.right+1){
+        var pitDepth=pd.depthMm-slabThk;
+        sctx.fillText(pd.pit.name,midX,slabBottomY+pitDepth*scale/2);
+        break;
+      }
+    }
+  }
+
+  if(concreteIntervals.length>0){
+    var totalLeft=projToX(concreteIntervals[0].left);
+    var totalRight=projToX(concreteIntervals[concreteIntervals.length-1].right);
+    var totalWidth=Math.round(concreteIntervals[concreteIntervals.length-1].right-concreteIntervals[0].left);
+    drawCanvasDimLine(sctx,totalLeft,slabTopY-25,totalRight,slabTopY-25,totalWidth+'mm',CF);
+  }
+  if(membraneIntervals.length>0){
+    var memLeft=projToX(membraneIntervals[0].left);
+    var memRight=projToX(membraneIntervals[membraneIntervals.length-1].right);
+    var totalMemWidth=Math.round(membraneIntervals[membraneIntervals.length-1].right-membraneIntervals[0].left);
+    drawCanvasDimLine(sctx,memLeft,slabTopY-40,memRight,slabTopY-40,totalMemWidth+'mm',MF);
+  }
+  if(membraneIntervals.length>0){
+    var rightMemX=projToX(membraneIntervals[membraneIntervals.length-1].right);
+    var dimX=rightMemX+30;
+    drawCanvasDimLine(sctx,dimX,slabTopY,dimX,pitFloorMemBottomY,maxDepthMm+'mm',CF);
+  }
+
+  sctx.fillStyle='#e0e0e0';
+  sctx.font='bold 12px sans-serif';
+  sctx.textAlign='center';
+  sctx.fillText('1-1 \u5256\u9762\u56FE',sw/2,14);
+}
+
+function clipperPathToProjections(paths){
+  var intervals=[];
+  for(var i=0;i<paths.length;i++){
+    var path=paths[i];
+    var projs=[];
+    for(var j=0;j<path.length;j++){
+      var x=path[j].X/CLIPPER_SCALE;
+      var z=path[j].Y/CLIPPER_SCALE;
+      projs.push(x);
+    }
+    if(projs.length<2) continue;
+    projs.sort(function(a,b){return a-b;});
+    intervals.push({left:projs[0],right:projs[projs.length-1]});
+  }
+  return mergeIntervals(intervals);
+}
+
+function mergeIntervals(intervals){
+  if(intervals.length===0) return [];
+  var sorted=intervals.slice().sort(function(a,b){return a.left-b.left;});
+  var merged=[sorted[0]];
+  for(var i=1;i<sorted.length;i++){
+    var last=merged[merged.length-1];
+    if(sorted[i].left<=last.right){
+      last.right=Math.max(last.right,sorted[i].right);
+    }else{
+      merged.push(sorted[i]);
+    }
+  }
+  return merged;
+}
+
+function subtractIntervals(base,holes){
+  var result=base.slice();
+  for(var i=0;i<holes.length;i++){
+    var hole=holes[i];
+    var next=[];
+    for(var j=0;j<result.length;j++){
+      var seg=result[j];
+      if(hole.right<=seg.left||hole.left>=seg.right){
+        next.push(seg);
+      }else{
+        if(hole.left>seg.left) next.push({left:seg.left,right:hole.left});
+        if(hole.right<seg.right) next.push({left:hole.right,right:seg.right});
+      }
+    }
+    result=next;
+  }
+  return result;
+}
+
+window.addEventListener('message',function(e){
+  try{
+    var data=typeof e.data==='string'?JSON.parse(e.data):e.data;
+    handleMessage(data);
+  }catch(err){}
+});
+
+function handleMessage(data){
+  switch(data.type){
+    case 'setTool':
+      state.currentTool=data.tool;
+      var hint=document.getElementById('drawModeHint');
+      if(data.tool==='draw') hint.textContent='手绘坑体';
+      else if(data.tool==='select') hint.textContent='选择移动';
+      else hint.textContent=data.tool;
+      render();
+      break;
+    case 'switchStep':
+      switchStep(data.step);
+      break;
+    case 'selectPit':
+      selectPit(data.id);
+      break;
+    case 'deselectPit':
+      state.selectedPitId=null;
+      render();
+      break;
+    case 'updatePit':
+      updatePitProp(data.id,data.prop,data.value);
+      if(state.currentStep===2) buildThreeScene();
+      break;
+    case 'updatePitProps':
+      var pit=state.pits.find(function(p){return p.id===data.id;});
+      if(pit){
+        Object.assign(pit,data.props);
+        pit.depth=pit.topElev-pit.bottomElev;
+        render();
+        if(state.currentStep===2) buildThreeScene();
+        sendToRN({type:'pitsChanged',pits:getPitsSummary()});
+      }
+      break;
+    case 'deletePit':
+      deletePit(data.id);
+      if(state.currentStep===2) buildThreeScene();
+      break;
+    case 'generate3D':
+      switchStep(2);
+      break;
+    case 'zoomFit':
+      zoomFit();
+      break;
+    case 'clearAll':
+      state.pits=[];
+      state.selectedPitId=null;
+      state.nextId=1;
+      render();
+      sendToRN({type:'pitsChanged',pits:getPitsSummary()});
+      break;
+    case 'undo':
+      if(state.pits.length>0){
+        var last=state.pits[state.pits.length-1];
+        deletePit(last.id);
+        if(state.currentStep===2) buildThreeScene();
+      }
+      break;
+    case 'exportDXF':
+      exportDXF();
+      break;
+    case 'exportPNG':
+      exportPNG();
+      break;
+    case 'updateSlabThickness':
+      state.slabThickness=data.value;
+      if(state.currentStep===2) buildThreeScene();
+      break;
+    case 'updateSlabMembraneThk':
+      state.slabMembraneThk=data.value;
+      if(state.currentStep===2) buildThreeScene();
+      break;
+    case 'switchViewMode':
+      switchViewMode(data.mode);
+      break;
+  }
+}
+
+resizeCanvas();
+sendToRN({type:'canvasReady'});
+
+})();
+</script>
+</body>
+</html>
