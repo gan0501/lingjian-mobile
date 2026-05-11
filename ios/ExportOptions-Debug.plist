@@ -11,7 +11,7 @@
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>cn.lingjian.zswcom</key>
-		<string>match Development cn.lingjian.zswcom</string>
+		<string>测试260510</string>
 	</dict>
 	<key>stripSwiftSymbols</key>
 	<true/>
