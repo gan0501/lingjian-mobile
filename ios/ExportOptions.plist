@@ -11,7 +11,7 @@
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>cn.lingjian.zswcom</key>
-		<string>match AppStore cn.lingjian.zswcom</string>
+		<string>正式260510</string>
 	</dict>
 	<key>stripSwiftSymbols</key>
 	<true/>
